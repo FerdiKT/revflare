@@ -1,0 +1,73 @@
+{
+  "name": "revflare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted in-app purchase and subscription revenue tracker that runs entirely on Cloudflare (Workers, Durable Objects, R2, Workflows): App Store revenue straight from Apple, MRR, churn, cohorts, an iOS app, an MCP server and a CLI.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Ferdi",
+  "homepage": "https://github.com/FerdiKT/revflare#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FerdiKT/revflare.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FerdiKT/revflare/issues"
+  },
+  "keywords": [
+    "revflare",
+    "revenue",
+    "subscriptions",
+    "in-app purchases",
+    "app store",
+    "mrr",
+    "revenuecat alternative",
+    "cloudflare workers",
+    "self-hosted"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "cli:build": "node scripts/embed-skill.mjs && tsc -p cli/tsconfig.json",
+    "cf-typegen": "wrangler types -c wrangler.jsonc worker/worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "hono": "^4.13.13",
+    "lucide-react": "^0.550.0",
+    "qrcode-generator": "^2.0.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^7.18.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.1",
+    "@cloudflare/vitest-pool-workers": "^0.12.21",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^3.2.7",
+    "wrangler": "^4.149.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "SECRET_KEY": {
+        "description": "Optional. A long random string used to encrypt stored App Store Connect keys and RevenueCat keys. If empty, a key is generated on first run and stored in the database."
+      },
+      "SETUP_TOKEN": {
+        "description": "Optional. Required to create the first (admin) account, so nobody else can claim a fresh instance."
+      },
+      "PUBLIC_URL": {
+        "description": "Optional. The public address of this instance (e.g. https://revflare.example.com). Defaults to the address of each request."
+      }
+    }
+  }
+}

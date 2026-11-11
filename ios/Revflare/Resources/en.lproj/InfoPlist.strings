@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Revflare";
+"NSCameraUsageDescription" = "Revflare uses the camera to scan the sign-in QR code shown in the web app.";
+"NSFaceIDUsageDescription" = "Revflare uses Face ID to unlock your revenue dashboard and to approve sign-ins on your computer.";

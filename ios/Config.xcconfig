@@ -1,0 +1,13 @@
+// Build settings that identify your copy of the app. Override them in the git-ignored Local.xcconfig
+// (cp Local.example.xcconfig Local.xcconfig), not here.
+
+// Bundle id of the app; the widget extension is <this>.widgets and the shared keychain group <team>.<this>.shared.
+// Also the APNs topic: set APNS_TOPIC on the server to the same value.
+REVFLARE_BUNDLE_ID = com.example.revflare
+// Apple Developer team id (Xcode → Settings → Accounts). Empty: simulator builds only.
+DEVELOPMENT_TEAM =
+// App Store provisioning profiles used by Release builds (scripts/release.sh).
+REVFLARE_APP_PROFILE = Revflare App Store
+REVFLARE_WIDGETS_PROFILE = Revflare Widgets App Store
+
+#include? "Local.xcconfig"

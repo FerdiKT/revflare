@@ -1,0 +1,11 @@
+// Bindings for the worker integration tests (vitest.workers.config.ts): wrangler.jsonc minus assets/routes.
+{
+  "name": "revflare-test",
+  "main": "../../worker/index.ts",
+  "compatibility_date": "2026-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": { "bindings": [{ "name": "DATABASE", "class_name": "RevflareDatabase" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RevflareDatabase"] }],
+  "r2_buckets": [{ "binding": "RAW", "bucket_name": "revflare-raw" }],
+  "workflows": [{ "name": "revflare-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" }]
+}

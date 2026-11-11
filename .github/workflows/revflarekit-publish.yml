@@ -1,0 +1,29 @@
+# Publishes sdk/ios to the RevflareKit Swift package repository (FerdiKT/RevflareKit) and tags new
+# Revflare.version values. Only runs in the upstream repository, with the REVFLAREKIT_DEPLOY_KEY secret (a deploy key
+# with write access on the mirror); copies of Revflare skip it.
+name: revflarekit-publish
+
+on:
+  push:
+    branches: [main]
+    paths: ["sdk/ios/**"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    if: github.repository == 'FerdiKT/revflare'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish
+        env:
+          DEPLOY_KEY: ${{ secrets.REVFLAREKIT_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then echo "REVFLAREKIT_DEPLOY_KEY is not set, skipping."; exit 0; fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/revflarekit && chmod 600 ~/.ssh/revflarekit
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/revflarekit -o IdentitiesOnly=yes"
+          bash scripts/publish-revflarekit.sh

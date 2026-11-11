@@ -1,0 +1,56 @@
+// Personal deployment config. Copy to wrangler.local.jsonc (git-ignored) and edit:
+//   cp wrangler.local.example.jsonc wrangler.local.jsonc
+// When wrangler.local.jsonc exists, `npm run dev` / `npm run build` / `npm run deploy` use it instead of
+// wrangler.jsonc. It is a full config, not a patch: keep it in sync with wrangler.jsonc.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "revflare",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "revenue.example.com", "custom_domain": true }],
+  // Optional (Workers Paid): sign-in links by email through Cloudflare Email Sending. Onboard the sender's domain first
+  // (Compute → Email Service → Email Sending, or `npx wrangler email sending enable example.com`), add
+  // "EMAIL_FROM": "Revflare <revflare@example.com>" to vars, uncomment the binding, deploy, then turn the links on in
+  // Admin → Settings. On Workers Free the binding only delivers to the account's verified destination addresses.
+  // Optional marketing site in front of the sign-in page (worker/lib/landing.ts): bind a Worker serving it as LANDING
+  // and add "/" and its pages (see LANDING_PATHS) to assets.run_worker_first.
+  // "services": [{ "binding": "LANDING", "service": "my-site" }],
+  // "send_email": [{ "name": "EMAIL", "remote": true }],
+  "vars": {
+    "PUBLIC_URL": "https://revenue.example.com",
+    // App Store page of your iOS app: a "Get the app" link next to "Sign in with the iPhone app" on the sign-in page.
+    // "APP_STORE_URL": "https://apps.apple.com/app/id0000000000",
+    // APNs (iOS app push notifications). The private key is a secret: `wrangler secret put APNS_PRIVATE_KEY`.
+    "APNS_KEY_ID": "",
+    "APNS_TEAM_ID": "",
+    "APNS_TOPIC": "com.example.revflare",
+    // Events and funnels: your Cloudflare account id (the SQL API reads the EVENTS dataset). The token is a secret:
+    // `wrangler secret put CF_ANALYTICS_TOKEN` (API token with Account → Account Analytics → Read).
+    "CF_ACCOUNT_ID": ""
+    // Daily GitHub release check (Admin → Overview): "false" turns it off; UPDATE_REPO follows a fork.
+    // "UPDATE_CHECK": "false",
+    // "UPDATE_REPO": "owner/revflare",
+    // Workers Paid: raise the daily row budgets of background work (imports, backfills; worker/lib/budget.ts).
+    // "BACKGROUND_READS_PER_DAY": "20000000",
+    // "BACKGROUND_WRITES_PER_DAY": "2000000"
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/apple/*", "/google/*", "/polar/*", "/sdk/*", "/mcp", "/mcp/*", "/.well-known/*"]
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "DATABASE", "class_name": "RevflareDatabase" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RevflareDatabase"] }],
+  "r2_buckets": [{ "binding": "RAW", "bucket_name": "revflare-raw" }],
+  // App events from RevflareKit (funnels, events explorer): Workers Analytics Engine, never the database. Querying them
+  // needs CF_ACCOUNT_ID (var) and the secret CF_ANALYTICS_TOKEN (Account → Account Analytics → Read). README: Events and funnels.
+  "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "revflare_events" }],
+  "workflows": [{ "name": "revflare-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" }],
+  "triggers": { "crons": ["*/5 * * * *"] }
+}

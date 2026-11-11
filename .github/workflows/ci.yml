@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Typecheck the CLI and its tests
+        run: npm run typecheck
+        working-directory: cli
+      - name: Test
+        run: npx vitest run
+      - name: Test the self-hosters' update script
+        run: bash scripts/test-revflare-update.sh
+      - name: Build the CLI
+        run: npm run cli:build
+      - name: Build the app and Worker
+        run: npx vite build
+
+  sdk-ios:
+    # RevflareKit (sdk/ios) builds and tests on macOS. The iOS app needs signing settings and is built locally.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test RevflareKit
+        run: swift test
+        working-directory: sdk/ios

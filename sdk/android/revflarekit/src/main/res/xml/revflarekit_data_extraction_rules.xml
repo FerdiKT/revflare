@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    RevflareKit's install state must stay on the device (Android 12+: android:dataExtractionRules).
+    Use this file as is (android:dataExtractionRules="@xml/revflarekit_data_extraction_rules"), or copy the exclude
+    lines into the app's own rules.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="app.revflare.kit.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="app.revflare.kit.xml" />
+    </device-transfer>
+</data-extraction-rules>

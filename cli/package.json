@@ -1,0 +1,43 @@
+{
+  "name": "revflare",
+  "version": "0.1.0",
+  "description": "Command line client for Revflare, the self-hosted in-app purchase and subscription revenue tracker on Cloudflare: MRR, revenue, churn, trials, sales feed and imports.",
+  "license": "SEE LICENSE IN LICENSE",
+  "author": "Ferdi",
+  "homepage": "https://github.com/FerdiKT/revflare/tree/main/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FerdiKT/revflare.git",
+    "directory": "cli"
+  },
+  "bugs": {
+    "url": "https://github.com/FerdiKT/revflare/issues"
+  },
+  "type": "module",
+  "bin": {
+    "revflare": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "revflare",
+    "revenue",
+    "subscriptions",
+    "mrr",
+    "app store",
+    "in-app purchases",
+    "cli",
+    "cloudflare"
+  ],
+  "scripts": {
+    "build": "node ../scripts/embed-skill.mjs && tsc -p tsconfig.json",
+    "typecheck": "node ../scripts/embed-skill.mjs && tsc -p tsconfig.test.json",
+    "prepublishOnly": "npm run build"
+  }
+}

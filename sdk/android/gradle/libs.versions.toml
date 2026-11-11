@@ -1,0 +1,22 @@
+[versions]
+agp = "8.13.2"
+kotlin = "2.3.21"
+billing = "9.1.0"
+installreferrer = "2.2"
+coroutines = "1.10.2"
+lifecycle = "2.9.4"
+adsIdentifier = "18.3.0"
+junit = "4.13.2"
+
+[libraries]
+billing = { module = "com.android.billingclient:billing", version.ref = "billing" }
+installreferrer = { module = "com.android.installreferrer:installreferrer", version.ref = "installreferrer" }
+coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
+ads-identifier = { module = "com.google.android.gms:play-services-ads-identifier", version.ref = "adsIdentifier" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

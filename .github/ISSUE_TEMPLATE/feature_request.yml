@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest an idea or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How could Revflare help? Links to Apple's App Store Server API / App Store Connect API docs are welcome.
+  - type: checkboxes
+    id: free-plan
+    attributes:
+      label: Constraints
+      options:
+        - label: It can run within the Cloudflare Workers Free plan and its daily database budget (or is opt-in)

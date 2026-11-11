@@ -1,0 +1,23 @@
+node_modules
+dist
+.wrangler
+.dev.vars
+*.log
+.DS_Store
+# Personal deployment config (custom domain, vars...), see wrangler.local.example.jsonc
+wrangler.local.jsonc
+# iOS build products and generated project
+ios/build
+ios/*.xcodeproj
+ios/DerivedData
+*.xcarchive
+*.ipa
+*.p8
+# iOS simulator screenshots show real revenue: local only
+ios/screenshots/
+# Private working notes (plans, ids): local only
+PROGRESS.local.md
+*.local.md
+# iOS personal signing / bundle ids (see ios/Local.example.xcconfig)
+ios/Local.xcconfig
+*.tsbuildinfo

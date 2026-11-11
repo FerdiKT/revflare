@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    RevflareKit's install state must stay on the device (Android 11 and lower: android:fullBackupContent).
+    Use this file as is (android:fullBackupContent="@xml/revflarekit_backup_rules"), or copy the exclude line into
+    the app's own rules. RevflareKit also detects a restored copy and starts over, so this only saves a reset.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="app.revflare.kit.xml" />
+</full-backup-content>

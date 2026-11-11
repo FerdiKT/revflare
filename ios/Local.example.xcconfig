@@ -1,0 +1,8 @@
+// Your signing settings. Copy to Local.xcconfig (git-ignored) and edit, then run `xcodegen generate`.
+REVFLARE_BUNDLE_ID = com.example.revflare
+DEVELOPMENT_TEAM = ABCDE12345
+// Names of your App Store provisioning profiles (Release builds, scripts/release.sh).
+REVFLARE_APP_PROFILE = Revflare App Store
+REVFLARE_WIDGETS_PROFILE = Revflare Widgets App Store
+// Apple ID used by scripts/create-app-record.sh (asc web session); not a build setting Xcode uses.
+ASC_WEB_APPLE_ID = you@example.com

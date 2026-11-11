@@ -1,0 +1,3 @@
+"CFBundleDisplayName" = "Revflare";
+"NSCameraUsageDescription" = "Revflare, web uygulamasında gösterilen giriş QR kodunu okumak için kamerayı kullanır.";
+"NSFaceIDUsageDescription" = "Revflare, gelir panelinin kilidini açmak ve bilgisayarındaki girişleri onaylamak için Face ID kullanır.";

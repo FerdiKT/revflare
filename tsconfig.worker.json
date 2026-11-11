@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.worker.tsbuildinfo",
+    "target": "ES2022",
+    "lib": [
+      "ES2023"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": [
+      "./worker/worker-configuration.d.ts",
+      "node",
+      "vite/client",
+      "@cloudflare/vitest-pool-workers"
+    ],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "worker",
+    "shared",
+    "test"
+  ]
+}

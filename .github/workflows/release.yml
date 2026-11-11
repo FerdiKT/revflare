@@ -1,0 +1,62 @@
+# Releases (upstream repository only): release-please keeps one release PR per component open (server `v*`, CLI
+# `cli-v*`) from Conventional Commits on main; merging it tags, creates the GitHub release and, for the CLI, publishes
+# to npm with Trusted Publishing (OIDC, no token). See docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    # Upstream only, and only once the repository is public (npm provenance needs it); skipped while private.
+    if: github.repository == 'FerdiKT/revflare' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      cli_release: ${{ steps.release.outputs['cli--release_created'] }}
+      cli_tag: ${{ steps.release.outputs['cli--tag_name'] }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish-cli:
+    needs: release-please
+    if: needs.release-please.outputs.cli_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # npm Trusted Publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.cli_tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # Trusted Publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@latest
+      # The CLI has no runtime dependencies; it builds with the root's TypeScript.
+      - run: npm ci
+      - run: npm run cli:build
+      - name: Publish to npm
+        working-directory: cli
+        run: npm publish --provenance --access public

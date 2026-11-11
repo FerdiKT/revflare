@@ -1,0 +1,118 @@
+# Keeps a copy of Revflare up to date (e.g. the repository the "Deploy to Cloudflare" button created for you).
+# Weekly (or by hand: Actions → Revflare update → Run workflow) it looks for a newer upstream release and opens a pull
+# request that updates your code to it; merging deploys it (Workers Builds). Your wrangler.jsonc, wrangler.local*.jsonc,
+# .dev.vars* and workflow files are never touched. Does nothing in the upstream repository itself.
+#
+# Needs: Settings → Actions → General → Workflow permissions → "Allow GitHub Actions to create and approve pull
+# requests". Without it the workflow opens an issue with instructions instead.
+# Optional repository variable REVFLARE_UPSTREAM_REPO (owner/name) to follow another repository.
+name: Revflare update
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: revflare-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository != 'FerdiKT/revflare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      UPSTREAM_REPO: ${{ vars.REVFLARE_UPSTREAM_REPO || 'FerdiKT/revflare' }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Look for a newer release
+        id: check
+        run: bash scripts/revflare-update.sh check
+
+      - name: Skip versions already proposed
+        id: existing
+        if: steps.check.outputs.update == 'true'
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          branch="revflare-update/$TAG"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          # Any PR for this version (open, merged or closed): nothing to do. A newer release gets a new branch.
+          pr="$(gh pr list --repo "$REPO" --head "$branch" --state all --json url --jq '.[0].url // ""')"
+          if [ -n "$pr" ]; then
+            echo "Already proposed: $pr"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update the code to the new release
+        if: steps.check.outputs.update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          PUSHED: ${{ steps.existing.outputs.pushed }}
+        run: |
+          bash scripts/revflare-update.sh apply "$TAG" "$RUNNER_TEMP/body.md"
+          if [ "$PUSHED" = "true" ]; then
+            echo "Branch $BRANCH already pushed by an earlier run; reusing it."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to change."
+            exit 0
+          fi
+          git commit -q -m "chore: update Revflare to $TAG"
+          git push origin "$BRANCH"
+
+      - name: Open the pull request
+        if: steps.check.outputs.update == 'true' && steps.existing.outputs.skip == 'false'
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+          BRANCH: ${{ steps.existing.outputs.branch }}
+          CURRENT: ${{ steps.check.outputs.current }}
+        run: |
+          title="Update Revflare to $TAG"
+          if gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md"; then
+            exit 0
+          fi
+          echo "::warning::Could not open a pull request. Enable Settings → Actions → General → 'Allow GitHub Actions to create and approve pull requests'."
+          if [ -n "$(gh issue list --repo "$REPO" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // ""')" ]; then
+            echo "An issue for $TAG is already open."
+            exit 0
+          fi
+          {
+            echo "Revflare **$TAG** is available (this repository runs v$CURRENT), and the update is ready on the branch \`$BRANCH\`."
+            echo
+            echo "The workflow could not open a pull request. Either open it yourself:"
+            echo "https://github.com/$REPO/compare/$BASE...$BRANCH?expand=1"
+            echo
+            echo "or allow it for next time: **Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests**, then run the *Revflare update* workflow again (it reuses the branch)."
+            echo
+            echo "---"
+            echo
+            cat "$RUNNER_TEMP/body.md"
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "$REPO" --title "$title" --body-file "$RUNNER_TEMP/issue.md"

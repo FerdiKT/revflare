@@ -1,0 +1,8 @@
+"How much did I make today in ${applicationName}" = "${applicationName} ile bugün ne kadar kazandım";
+"How much did I make today with ${applicationName}" = "${applicationName} bugün ne kadar kazandım";
+"Today's revenue in ${applicationName}" = "${applicationName} bugünkü gelir";
+"${applicationName} today" = "${applicationName} bugün";
+"How much did ${app} make today in ${applicationName}" = "${applicationName} ile ${app} bugün ne kadar kazandı";
+"What's my MRR in ${applicationName}" = "${applicationName} MRR'ım ne kadar";
+"${applicationName} MRR" = "${applicationName} MRR";
+"What's the MRR of ${app} in ${applicationName}" = "${applicationName} ile ${app} MRR'ı ne kadar";

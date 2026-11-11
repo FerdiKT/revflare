@@ -1,0 +1,8 @@
+"How much did I make today in ${applicationName}" = "How much did I make today in ${applicationName}";
+"How much did I make today with ${applicationName}" = "How much did I make today with ${applicationName}";
+"Today's revenue in ${applicationName}" = "Today's revenue in ${applicationName}";
+"${applicationName} today" = "${applicationName} today";
+"How much did ${app} make today in ${applicationName}" = "How much did ${app} make today in ${applicationName}";
+"What's my MRR in ${applicationName}" = "What's my MRR in ${applicationName}";
+"${applicationName} MRR" = "${applicationName} MRR";
+"What's the MRR of ${app} in ${applicationName}" = "What's the MRR of ${app} in ${applicationName}";

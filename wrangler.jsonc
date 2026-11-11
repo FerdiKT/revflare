@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "revflare",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // Custom domain, PUBLIC_URL, APNs (iOS push) and other personal settings: put your own config in the git-ignored
+  // wrangler.local.jsonc (see wrangler.local.example.jsonc). Secrets: `wrangler secret put SECRET_KEY` (recommended),
+  // SETUP_TOKEN (optional), APNS_PRIVATE_KEY (iOS push).
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/apple/*", "/google/*", "/polar/*", "/sdk/*", "/mcp", "/mcp/*", "/.well-known/*"]
+  },
+  // The database is SQLite inside one Durable Object (worker/lib/db.ts), so Revflare works on accounts whose
+  // D1 database quota is full. Binding a D1 database as `D1` switches to D1 without code changes.
+  "durable_objects": {
+    "bindings": [{ "name": "DATABASE", "class_name": "RevflareDatabase" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RevflareDatabase"] }],
+  "r2_buckets": [{ "binding": "RAW", "bucket_name": "revflare-raw" }],
+  // App events from RevflareKit (funnels, events explorer): Workers Analytics Engine, never the database. Querying them
+  // needs CF_ACCOUNT_ID (var) and the secret CF_ANALYTICS_TOKEN (Account → Account Analytics → Read). README: Events and funnels.
+  "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "revflare_events" }],
+  "workflows": [{ "name": "revflare-import", "binding": "IMPORT_WORKFLOW", "class_name": "ImportWorkflow" }],
+  "triggers": { "crons": ["*/5 * * * *"] }
+}

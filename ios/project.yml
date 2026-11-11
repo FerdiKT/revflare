@@ -1,0 +1,143 @@
+name: Revflare
+options:
+  bundleIdPrefix: com.example
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+# Bundle id, team and profiles: Config.xcconfig, overridden by the git-ignored Local.xcconfig (see README).
+configFiles:
+  Debug: Config.xcconfig
+  Release: Config.xcconfig
+settings:
+  base:
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+    SWIFT_EMIT_LOC_STRINGS: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      APS_ENVIRONMENT: development
+    Release:
+      APS_ENVIRONMENT: production
+targets:
+  Revflare:
+    type: application
+    platform: iOS
+    sources:
+      - path: Revflare
+        excludes:
+          - "**/*.md"
+    entitlements:
+      path: Revflare/Revflare.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(REVFLARE_BUNDLE_ID).shared
+    info:
+      path: Revflare/Info.plist
+      properties:
+        CFBundleDisplayName: Revflare
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, tr]
+        CFBundleAllowMixedLocalizations: true
+        CFBundleURLTypes:
+          - CFBundleURLName: $(REVFLARE_BUNDLE_ID)
+            CFBundleURLSchemes: [revflare]
+        LSApplicationCategoryType: public.app-category.finance
+        RevflareBundleID: $(REVFLARE_BUNDLE_ID)
+        RevflareKeychainGroup: $(DEVELOPMENT_TEAM).$(REVFLARE_BUNDLE_ID).shared
+        ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: Revflare uses the camera to scan the sign-in QR code shown in the web app.
+        NSFaceIDUsageDescription: Revflare uses Face ID to unlock your revenue dashboard and to approve sign-ins on your computer.
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
+        UIBackgroundModes: [remote-notification]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(REVFLARE_BUNDLE_ID)
+        PRODUCT_NAME: Revflare
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+      configs:
+        # App Store signing (profiles created with `asc profiles create`, see README).
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: iPhone Distribution
+          PROVISIONING_PROFILE_SPECIFIER: $(REVFLARE_APP_PROFILE)
+    dependencies:
+      - target: RevflareWidgets
+        embed: true
+  RevflareWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RevflareWidgets
+      # Shared with the app: API client, models, formatting, keychain, cache, Live Activity attributes, intents.
+      # App and extension share the token and settings through the keychain group above (no App Group needed).
+      - path: Revflare/Core
+      - path: Revflare/Resources
+        excludes:
+          - Assets.xcassets
+          - "*.caf"
+          - "*.lproj/InfoPlist.strings"
+          - "*.lproj/AppShortcuts.strings"
+    entitlements:
+      path: RevflareWidgets/RevflareWidgets.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(REVFLARE_BUNDLE_ID).shared
+    info:
+      path: RevflareWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Revflare
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, tr]
+        NSSupportsLiveActivities: true
+        RevflareBundleID: $(REVFLARE_BUNDLE_ID)
+        RevflareKeychainGroup: $(DEVELOPMENT_TEAM).$(REVFLARE_BUNDLE_ID).shared
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(REVFLARE_BUNDLE_ID).widgets
+        PRODUCT_NAME: RevflareWidgets
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: WidgetBackground
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: iPhone Distribution
+          PROVISIONING_PROFILE_SPECIFIER: $(REVFLARE_WIDGETS_PROFILE)
+schemes:
+  Revflare:
+    build:
+      targets:
+        Revflare: all
+        RevflareWidgets: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,27 @@
+# Runs in the RevflareKit-Android mirror: a version tag (e.g. 1.8.0) publishes io.github.ferdikt:revflarekit to
+# GitHub Packages after the unit tests pass.
+name: publish
+
+on:
+  push:
+    tags: ["*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Test and publish
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew --no-daemon :revflarekit:testDebugUnitTest :revflarekit:publishReleasePublicationToGitHubPackagesRepository
