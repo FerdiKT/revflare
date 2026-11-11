@@ -166,7 +166,7 @@ final class RemoteConfigRequestTests: XCTestCase {
                         + "&appVersion=2.1&appBuild=12&osVersion=18.1&locale=zh_CN&storefront=CN&source=unknown&sdk=\(Revflare.version)")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Revflare-Key"), "rfp_test")
         XCTAssertEqual(request.value(forHTTPHeaderField: "If-None-Match"), "\"a1b2c3d4\"")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "RevflareKit/1.9.1")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "RevflareKit/\(Revflare.version)")
         XCTAssertNil(request.httpBody)
     }
 
@@ -192,7 +192,7 @@ final class RemoteConfigRequestTests: XCTestCase {
     }
 
     func testVersion() {
-        XCTAssertEqual(Revflare.version, "1.9.1")
+        XCTAssertEqual(Revflare.version, "1.9.2")
     }
 }
 
