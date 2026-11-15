@@ -150,7 +150,7 @@ export function activitySql(dataset: string, appId: string, installIds: string[]
     `SELECT ${c.name} AS name, ${c.ts} AS ts, ${c.session} AS session, ${c.install} AS install, ${c.appVersion} AS app_version, ${c.environment} AS environment, ` +
     `${c.placement} AS placement, ${c.offering} AS offering, ${c.product} AS product, ${c.step} AS step, ${c.screen} AS screen ` +
     `FROM ${dataset} WHERE ${appScope(appId, to - ACTIVITY_DAYS * DAY, to, { includeTest: true })} AND ${c.install} IN (${ids}) ` +
-    `ORDER BY ${c.ts} DESC LIMIT ${sqlInt(ACTIVITY_EVENTS)}`
+    `ORDER BY ts DESC LIMIT ${sqlInt(ACTIVITY_EVENTS)}`
   );
 }
 

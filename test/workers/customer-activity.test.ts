@@ -122,6 +122,7 @@ describe("customer last seen and activity", () => {
     expect(full.status).toBe(200);
     expect(sqls).toHaveLength(1);
     expect(sqls[0]).toContain(`blob2 IN ('${I}')`);
+    expect(sqls[0]).toContain("ORDER BY ts DESC");
     expect(full.json.installIds).toEqual([I]);
     expect(full.json.activity).toMatchObject({ source: "events", lastEventAt: tE + 9000, truncated: false });
     expect(full.json.activity.sessions).toHaveLength(1);
