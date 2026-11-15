@@ -189,7 +189,7 @@ export const customer: Command = {
     println(`${c.bold(cu.id)}  ${cu.appName}${cu.country ? `  ${cu.country}` : ""}`);
     println(`${c.gray("Spent".padEnd(14))}${m(cu.totalSpent)} ${c.gray(`(proceeds ${m(cu.totalProceeds)})`)}`);
     const firstSrc = cu.firstSeenSource === "install" ? "app install" : cu.firstSeenSource === "purchase" ? "first purchase" : "";
-    const lastSrc = cu.lastSeenSource === "app" ? "in the app" : cu.lastSeenSource === "notification" ? "store notification" : cu.lastSeenSource === "purchase" ? "purchase" : "";
+    const lastSrc = cu.lastSeenSource === "app" ? "in the app" : cu.lastSeenSource === "notification" ? "store notification" : cu.lastSeenSource === "purchase" ? "their last purchase" : "";
     println(`${c.gray("First seen".padEnd(14))}${fmtWhen(cu.firstSeenAt)}${firstSrc ? c.gray(` · ${firstSrc}`) : ""}`);
     println(`${c.gray("Last seen".padEnd(14))}${fmtWhen(cu.lastSeenAt)}${lastSrc ? c.gray(` · ${lastSrc}`) : ""}`);
     if (cu.installedAt) println(`${c.gray("Installed".padEnd(14))}${fmtWhen(cu.installedAt)}${cu.installedAtSource === "first_report" ? c.gray(" · first report") : ""}`);
@@ -210,6 +210,16 @@ export const customer: Command = {
       const path = [named(a.campaignId, a.campaignName), named(a.adGroupId, a.adGroupName), named(a.keywordId, a.keywordName)].filter(Boolean).join(" → ");
       const label = a.source === "apple_ads" ? `${a.test ? "Apple Ads (test attribution)" : "Apple Ads"}${path ? `  ${path}` : ""}` : a.source === "organic" ? "Organic" : a.source === "google_ads" ? "Google Ads (install referrer gclid)" : a.source === "referral" ? "Referral (install referrer utm_source)" : c.gray("Unknown (no RevflareKit install linked)");
       println(`${c.gray("Acquisition".padEnd(14))}${label}`);
+    }
+    if (cu.activity?.sessions.length) {
+      const a = cu.activity;
+      println("", `${c.bold("Recent activity")} ${c.gray(a.source === "events" ? "(every event, latest sessions first)" : "(key events only: set up event queries for app opens and screens)")}`);
+      for (const s of a.sessions.slice(0, 5)) {
+        const meta = [fmtDuration(Math.max(0, s.endedAt - s.startedAt)), s.appVersion ? `v${s.appVersion}` : null, s.environment && s.environment !== "production" ? s.environment : null].filter(Boolean).join(" · ");
+        println(`${c.gray(fmtWhen(s.startedAt).padEnd(20))}${c.gray(meta)}`);
+        println(`  ${s.events.map((e) => `${e.name}${e.detail ? c.gray(` (${e.detail})`) : ""}${e.count > 1 ? c.gray(` ×${e.count}`) : ""}`).join(c.gray(" → "))}`);
+      }
+      if (a.sessions.length > 5 || a.truncated) println(c.gray("  older sessions: --json"));
     }
     if (cu.subscriptions.length) {
       println("", c.bold("Subscriptions"));

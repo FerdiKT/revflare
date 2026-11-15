@@ -31,6 +31,7 @@ import { customerAttribution, toAdsAttribution, TX_ATTRIBUTION_COLUMNS, TX_ATTRI
 import { defineDbFunction, type Db } from "./db";
 import { computeGoals, PAST_VERSION_KEY } from "./goals";
 import { rebuildQueued } from "./rollup";
+import { keyEventActivity } from "./customer-activity";
 import { FxCache, addDays, dayOf, dayStart, keptShareSql, periodMonths, refundedShareSql } from "./money";
 import { base64url, fromBase64url, now } from "./util";
 
@@ -1029,6 +1030,8 @@ const toSubscription = (r: SubRow, rate: number): Subscription => ({
 
 /** Installs (RevflareKit) linked to a customer, at most this many (newest activity checked for a few). */
 const CUSTOMER_INSTALLS = 20;
+/** Transaction kinds the user makes themselves (in the app): they count as being seen. */
+const USER_KINDS = new Set(["new", "trial", "one_time", "restore"]);
 const CUSTOMER_ACTIVITY_PROBES = 5;
 
 /**
@@ -1036,7 +1039,8 @@ const CUSTOMER_ACTIVITY_PROBES = 5;
  * appAccountToken (= install id), then the attribution rows (primary key) for the install time, and the latest key
  * event of the most recent ones (idx_app_events_install, one row each) for the app's last activity.
  */
-async function customerInstalls(db: Db, appId: string, otids: string[], token: string | null): Promise<{ installId: string; installedAt: number; fromDevice: boolean; lastActiveAt: number }[]> {
+/** Install ids linked to the customer: their appAccountToken and the installs of their transactions (install_links). */
+async function linkedInstallIds(db: Db, appId: string, otids: string[], token: string | null): Promise<string[]> {
   const ids = new Set<string>();
   if (token) ids.add(token.toLowerCase());
   for (let i = 0; i < otids.length && ids.size < CUSTOMER_INSTALLS; i += ID_CHUNK) {
@@ -1045,9 +1049,12 @@ async function customerInstalls(db: Db, appId: string, otids: string[], token: s
       .prepare(`SELECT DISTINCT install_id FROM install_links WHERE app_id = ? AND original_transaction_id IN (${chunk.map(() => "?").join(",")})`)
       .bind(appId, ...chunk)
       .all<{ install_id: string }>();
-    for (const r of results) ids.add(r.install_id);
+    for (const r of results) ids.add(r.install_id.toLowerCase());
   }
-  const list = [...ids].slice(0, CUSTOMER_INSTALLS);
+  return [...ids].slice(0, CUSTOMER_INSTALLS);
+}
+
+async function customerInstalls(db: Db, appId: string, list: string[]): Promise<{ installId: string; installedAt: number; fromDevice: boolean; lastActiveAt: number }[]> {
   if (!list.length) return [];
   const { results: rows } = await db
     .prepare(`SELECT install_id, installed_at, created_at, updated_at FROM attributions WHERE app_id = ? AND install_id IN (${list.map(() => "?").join(",")})`)
@@ -1126,7 +1133,8 @@ export const customer = defineDbFunction("customer", async (db, args: Scope & { 
     subscriptions.push(sub);
   }
   const transactions = txs.map((t) => toTransaction(t, rate));
-  const installs = await customerInstalls(db, c.app_id, otids, c.app_account_token);
+  const installIds = await linkedInstallIds(db, c.app_id, otids, c.app_account_token);
+  const installs = await customerInstalls(db, c.app_id, installIds);
   const t = now();
   const installedAt = installs.length ? Math.min(...installs.map((i) => i.installedAt)) : null;
   const firstInstall = installs.find((i) => i.installedAt === installedAt) ?? null;
@@ -1165,12 +1173,17 @@ export const customer = defineDbFunction("customer", async (db, args: Scope & { 
   // First / last seen: the install and the app's activity (RevflareKit) with the store's transactions and notifications.
   const firstTx = first?.purchased_at ?? c.first_seen_at;
   const firstSeenAt = installedAt !== null && installedAt < firstTx ? installedAt : Math.min(firstTx, c.first_seen_at);
-  const seen: { at: number; source: "app" | "purchase" | "notification" }[] = [];
-  const pastTx = txs.filter((x) => x.purchased_at <= t).reduce((m, x) => Math.max(m, x.purchased_at), 0);
-  if (pastTx) seen.push({ at: pastTx, source: "purchase" });
-  if (raw.length) seen.push({ at: Math.min(raw[0].at, t), source: "notification" });
+  // Last seen: when the user was in the app. Their own purchases count (a purchase is made in the app); renewals, trial
+  // conversions and store notifications happen without them and do not. The route refines the app side with every
+  // event (Analytics Engine) when event queries are configured.
+  const activity = await keyEventActivity(db, c.app_id, installIds, t);
+  const seen: { at: number; source: "app" | "purchase" }[] = [];
+  const ownTx = txs.filter((x) => x.purchased_at <= t && USER_KINDS.has(x.kind)).reduce((m, x) => Math.max(m, x.purchased_at), 0);
+  if (ownTx) seen.push({ at: ownTx, source: "purchase" });
   for (const i of installs) if (i.lastActiveAt) seen.push({ at: Math.min(i.lastActiveAt, t), source: "app" });
+  if (activity?.lastEventAt) seen.push({ at: activity.lastEventAt, source: "app" });
   const last = seen.reduce<(typeof seen)[number] | null>((m, x) => (!m || x.at > m.at ? x : m), null);
+  // Nothing the user did is known (e.g. imported renewals only): the first time they were seen.
   return {
     id: c.id,
     appId: c.app_id,
@@ -1179,7 +1192,7 @@ export const customer = defineDbFunction("customer", async (db, args: Scope & { 
     firstSeenAt,
     firstSeenSource: installedAt !== null && installedAt <= firstTx ? "install" : "purchase",
     firstPaidAt: c.first_paid_at,
-    lastSeenAt: last?.at ?? Math.min(c.last_seen_at, t),
+    lastSeenAt: last?.at ?? firstSeenAt,
     lastSeenSource: last?.source ?? "purchase",
     installedAt,
     installedAtSource: firstInstall ? (firstInstall.fromDevice ? "device" : "first_report") : null,
@@ -1193,6 +1206,8 @@ export const customer = defineDbFunction("customer", async (db, args: Scope & { 
     transactions,
     attribution: await customerAttribution(db, c.id),
     events,
+    installIds: [...installIds].sort((a, b) => (installs.find((i) => i.installId === b)?.lastActiveAt ?? 0) - (installs.find((i) => i.installId === a)?.lastActiveAt ?? 0)),
+    activity,
   };
 });
 

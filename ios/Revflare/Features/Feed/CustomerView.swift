@@ -15,6 +15,9 @@ struct CustomerView: View {
             if let c = loader.value {
                 header(c)
                 activity(c)
+                if let a = c.activity {
+                    CustomerSessionsSection(activity: a)
+                }
                 if let t = c.timing, t.installToPurchaseMs != nil || t.purchaseToCancelMs != nil || t.purchaseToRefundMs != nil {
                     Section {
                         TimingRows(timing: t)
@@ -141,7 +144,7 @@ struct CustomerView: View {
     private func lastSource(_ s: String?) -> String? {
         switch s {
         case "app": String(localized: "In the app")
-        case "purchase": String(localized: "Purchase")
+        case "purchase": String(localized: "Their last purchase")
         case "notification": String(localized: "Store notification")
         default: nil
         }

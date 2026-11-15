@@ -674,3 +674,11 @@
 "5 min" = "5 dk";
 "Cancelled within 5 minutes" = "5 dakika içinde iptal etti";
 "Bought within 5 minutes" = "5 dakika içinde satın aldı";
+
+/* Customer: recent activity in the app */
+"Recent activity" = "Son uygulama hareketleri";
+"Show %lld more" = "%lld oturum daha göster";
+"No events from their installs yet." = "Bu kullanıcının cihazlarından henüz olay gelmedi.";
+"Their latest sessions with every event, newest first." = "Son oturumları ve her olayı, en yenisi üstte.";
+"Key events only (paywalls, purchases, onboarding). Set up event queries on the server to see app opens and screens." = "Yalnızca temel olaylar (paywall, satın alma, onboarding). Uygulama açılışlarını ve ekranları görmek için sunucuda olay sorgularını ayarlayın.";
+"Their last purchase" = "Son satın alması";

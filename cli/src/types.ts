@@ -521,7 +521,7 @@ export interface Customer {
   firstSeenAt: number;
   firstSeenSource?: "install" | "purchase";
   firstPaidAt: number | null;
-  /** Latest of the app's activity (RevflareKit), transactions and store notifications (ms). */
+  /** When the customer last used the app (ms): RevflareKit activity or a purchase they made (renewals do not count). */
   lastSeenAt: number;
   lastSeenSource?: "app" | "purchase" | "notification";
   /** Install time of the customer's earliest linked RevflareKit install (ms). */
@@ -540,6 +540,36 @@ export interface Customer {
   transactions: Transaction[];
   /** Apple notification history of the customer's subscriptions and purchases, newest first (at most 100). */
   events?: CustomerEvent[];
+  /** RevflareKit install ids linked to the customer. */
+  installIds?: string[];
+  /** Latest sessions in the app with their events (null: no install linked). */
+  activity?: CustomerActivity | null;
+}
+
+/** A customer's recent in-app activity: sessions newest first, events oldest first within each. */
+export interface CustomerActivity {
+  /** "events": every event (Analytics Engine); "key_events": exact key events only. */
+  source: "events" | "key_events";
+  lastEventAt: number | null;
+  sessions: CustomerSession[];
+  truncated: boolean;
+}
+
+export interface CustomerSession {
+  sessionId: string;
+  installId: string;
+  startedAt: number;
+  endedAt: number;
+  appVersion: string | null;
+  environment: string | null;
+  events: CustomerSessionEvent[];
+}
+
+export interface CustomerSessionEvent {
+  name: string;
+  ts: number;
+  detail: string | null;
+  count: number;
 }
 
 export interface AtRisk {

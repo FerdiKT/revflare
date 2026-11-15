@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ArrowLeft, Clock, Download, UserRound, Zap } from "lucide-react";
+import { ArrowLeft, ChevronRight, Clock, Download, MousePointerClick, UserRound, Zap } from "lucide-react";
 import { flag } from "@shared/countries";
-import type { AdsAttribution, Customer, CustomerEvent, Transaction } from "@shared/types";
+import type { AdsAttribution, Customer, CustomerEvent, CustomerSession, Transaction } from "@shared/types";
 import { AppIcon } from "../components/Logo";
 import { SubscriptionStatus } from "../components/SubscriptionStatus";
 import { AdsBadge, adsName, isQuick, KindBadge, OfferBadge, offerText } from "../components/TransactionRow";
@@ -68,11 +68,13 @@ export function CustomerPage() {
 
           <ActivityCard d={d} now={now} />
 
+          <SessionsCard d={d} now={now} />
+
           <Card className="mt-5 grid grid-cols-2 gap-5 p-5 sm:grid-cols-4">
             <Stat label="Total spent" value={money(d.totalSpent, currency)} />
             <Stat label="Proceeds" value={money(d.totalProceeds, currency)} />
             <Stat label="First payment" value={d.firstPaidAt ? date(d.firstPaidAt) : "—"} />
-            <Stat label="Last activity" value={date(d.lastSeenAt)} />
+            <Stat label="Last seen" value={date(d.lastSeenAt)} />
           </Card>
 
           <Card className="mt-5">
@@ -242,7 +244,7 @@ function QuickBadges({ d }: { d: Customer }) {
 }
 
 const FIRST_SOURCE = { install: "app install (RevflareKit)", purchase: "first purchase" } as const;
-const LAST_SOURCE = { app: "in the app (RevflareKit)", purchase: "purchase", notification: "store notification" } as const;
+const LAST_SOURCE = { app: "in the app (RevflareKit)", purchase: "their last purchase", notification: "store notification" } as const;
 
 /** First seen / last seen / installed with the time, and how fast they bought, cancelled or asked for a refund. */
 function ActivityCard({ d, now }: { d: Customer; now: number }) {
@@ -396,5 +398,82 @@ function Ident({ label, value }: { label: string; value: string }) {
         <CopyButton text={value} className="h-6 px-1.5" label="Copy" />
       </dd>
     </div>
+  );
+}
+
+/** Event chip colours: purchases, paywalls, onboarding, the rest. */
+function eventTone(name: string): string {
+  if (name.startsWith("purchase_") || name.startsWith("restore_")) return "bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-900";
+  if (name.startsWith("paywall_")) return "bg-brand-50 text-brand-800 ring-brand-200 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/30";
+  if (name.startsWith("onboarding_")) return "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:ring-sky-900";
+  return "bg-zinc-50 text-zinc-700 ring-zinc-200 dark:bg-zinc-800/60 dark:text-zinc-300 dark:ring-zinc-700";
+}
+
+function SessionFlow({ s, now }: { s: CustomerSession; now: number }) {
+  const length = s.endedAt - s.startedAt;
+  return (
+    <li className="py-3">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-500">
+        <span className="font-medium text-zinc-800 dark:text-zinc-200">{dateTime(s.startedAt)}</span>
+        <span>{ago(s.endedAt, now)}</span>
+        {length >= 1000 && <span>· {duration(length)}</span>}
+        {s.appVersion && <span>· v{s.appVersion}</span>}
+        {s.environment && s.environment !== "production" && <Badge>{s.environment}</Badge>}
+      </div>
+      <ol className="flex flex-wrap items-center gap-1">
+        {s.events.map((e, i) => (
+          <li key={`${e.ts}-${i}`} className="flex items-center gap-1">
+            {i > 0 && <ChevronRight className="size-3 shrink-0 text-zinc-300 dark:text-zinc-600" />}
+            <span title={`${dateTime(e.ts)}${e.detail ? ` · ${e.detail}` : ""}`} className={cn("inline-flex max-w-[16rem] items-baseline gap-1 rounded-md px-1.5 py-0.5 text-xs ring-1 ring-inset", eventTone(e.name))}>
+              <span className="font-medium">{e.name}</span>
+              {e.detail && <span className="truncate opacity-75">{e.detail}</span>}
+              {e.count > 1 && <span className="opacity-75">×{e.count}</span>}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </li>
+  );
+}
+
+/** What the customer did in the app lately: their latest sessions, each as a flow of events (RevflareKit). */
+function SessionsCard({ d, now }: { d: Customer; now: number }) {
+  const [all, setAll] = useState(false);
+  const a = d.activity;
+  if (a === undefined) return null;
+  const sessions = a?.sessions ?? [];
+  const shown = all ? sessions : sessions.slice(0, 3);
+  return (
+    <Card className="mt-5">
+      <CardHeader
+        title="Recent activity in the app"
+        description={
+          !a
+            ? "No RevflareKit install is linked to this customer."
+            : a.source === "events"
+              ? "Their latest sessions with every event, newest first (last 90 days)."
+              : "Their latest sessions with key events only (paywalls, purchases, onboarding). Set up event queries to see app opens and screens too."
+        }
+      />
+      {a && sessions.length === 0 ? (
+        <p className="flex items-center gap-2 px-5 pb-5 text-sm text-zinc-500">
+          <MousePointerClick className="size-4" /> No events from their installs yet.
+        </p>
+      ) : a ? (
+        <div className="px-5 pb-4">
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {shown.map((s) => (
+              <SessionFlow key={`${s.installId}-${s.sessionId}-${s.startedAt}`} s={s} now={now} />
+            ))}
+          </ul>
+          {sessions.length > shown.length && (
+            <Button variant="outline" className="mt-2" onClick={() => setAll(true)}>
+              Show {sessions.length - shown.length} more {sessions.length - shown.length === 1 ? "session" : "sessions"}
+            </Button>
+          )}
+          {all && a.truncated && <p className="mt-2 text-xs text-zinc-500">Older sessions are not shown.</p>}
+        </div>
+      ) : null}
+    </Card>
   );
 }

@@ -674,3 +674,11 @@
 "5 min" = "5 min";
 "Cancelled within 5 minutes" = "Cancelled within 5 minutes";
 "Bought within 5 minutes" = "Bought within 5 minutes";
+
+/* Customer: recent activity in the app */
+"Recent activity" = "Recent activity";
+"Show %lld more" = "Show %lld more";
+"No events from their installs yet." = "No events from their installs yet.";
+"Their latest sessions with every event, newest first." = "Their latest sessions with every event, newest first.";
+"Key events only (paywalls, purchases, onboarding). Set up event queries on the server to see app opens and screens." = "Key events only (paywalls, purchases, onboarding). Set up event queries on the server to see app opens and screens.";
+"Their last purchase" = "Their last purchase";

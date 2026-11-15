@@ -857,9 +857,9 @@ struct Customer: Codable, Sendable, Identifiable {
     /// "install" | "purchase"; nil from older servers.
     var firstSeenSource: String?
     var firstPaidAt: Double?
-    /// Latest of the app's activity (RevflareKit), transactions and store notifications.
+    /// When the customer last used the app: RevflareKit activity or a purchase they made (renewals do not count).
     var lastSeenAt: Double
-    /// "app" | "purchase" | "notification"; nil from older servers.
+    /// "app" | "purchase" ("notification" from older servers); nil from older servers.
     var lastSeenSource: String?
     /// RevflareKit install time; nil when no install is linked (or older servers).
     var installedAt: Double?
@@ -877,6 +877,39 @@ struct Customer: Codable, Sendable, Identifiable {
     var transactions: [Transaction]
     /// Apple notification history, newest first; nil from older servers.
     var events: [CustomerEvent]?
+    /// Latest sessions in the app with their events; nil when no install is linked (or older servers).
+    var activity: CustomerActivity?
+}
+
+/// A customer's recent in-app activity (`Customer.activity`): sessions newest first, events oldest first within each.
+struct CustomerActivity: Codable, Hashable, Sendable {
+    /// "events": every event (Analytics Engine); "key_events": exact key events only.
+    var source: String
+    var lastEventAt: Double?
+    var sessions: [CustomerSession]
+    var truncated: Bool
+}
+
+struct CustomerSession: Codable, Hashable, Sendable, Identifiable {
+    var sessionId: String
+    var installId: String
+    var startedAt: Double
+    var endedAt: Double
+    var appVersion: String?
+    /// production | sandbox | xcode
+    var environment: String?
+    var events: [CustomerSessionEvent]
+
+    var id: String { "\(installId)|\(sessionId)|\(Int(startedAt))" }
+}
+
+struct CustomerSessionEvent: Codable, Hashable, Sendable {
+    var name: String
+    var ts: Double
+    /// Promoted properties in words, e.g. "screen settings · product pro_yearly".
+    var detail: String?
+    /// Times it happened in a row.
+    var count: Int
 }
 
 // MARK: - Apple Ads attribution (RevflareKit)

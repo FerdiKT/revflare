@@ -72,7 +72,7 @@ describe("customer timing and quick buyers / cancellers", () => {
     // Customer C: no install; first / last seen from the store.
     const c = await call(owner, `/api/v1/customers/${by["97200"].customerId}`);
     expect(c.json).toMatchObject({ installedAt: null, installedAtSource: null, firstSeenAt: tC, firstSeenSource: "purchase", lastSeenAt: tC });
-    expect(["purchase", "notification"]).toContain(c.json.lastSeenSource);
+    expect(c.json.lastSeenSource).toBe("purchase");
     expect(c.json.timing).toMatchObject({ installToPurchaseMs: null, purchaseToCancelMs: null, quickPurchase: false, quickCancel: false });
 
     // Cancellations stream: newest first, linked to the customer, with the time since the purchase.

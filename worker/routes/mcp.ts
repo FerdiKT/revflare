@@ -142,8 +142,8 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
     },
     get_customer: {
       description:
-        "One customer: firstSeenAt / lastSeenAt (ms, with firstSeenSource install | purchase and lastSeenSource app | purchase | notification), installedAt (RevflareKit install), timing (installToPurchaseMs, purchaseToCancelMs, purchaseToRefundMs, quickPurchase / quickCancel: within 5 minutes), " +
-        "subscriptions (autoRenew false on a running one = cancelled, ends at expiresAt; autoRenewOffAt = when it was turned off, cancelledAfterMs = how long after the purchase), all transactions, total spent, attribution (Apple Ads campaign / ad group / keyword, organic or unknown) and events: the store notification history (type / subtype / at, newest first).",
+        "One customer: firstSeenAt / lastSeenAt (ms; lastSeenAt = when they last used the app: RevflareKit activity or a purchase they made, never renewals or store notifications; firstSeenSource install | purchase, lastSeenSource app | purchase), installedAt (RevflareKit install), timing (installToPurchaseMs, purchaseToCancelMs, purchaseToRefundMs, quickPurchase / quickCancel: within 5 minutes), " +
+        "subscriptions (autoRenew false on a running one = cancelled, ends at expiresAt; autoRenewOffAt = when it was turned off, cancelledAfterMs = how long after the purchase), all transactions, total spent, attribution (Apple Ads campaign / ad group / keyword, organic or unknown) events: the store notification history (type / subtype / at, newest first), installIds and activity: what they did in the app lately, their latest sessions (newest first) each with its events in order (name, detail = screen / step / placement / offering / product, count of repeats); activity.source events = every event (app_open, screens...), key_events = paywall / purchase / onboarding only.",
       inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
       run: (c, a) => call(c, "GET", `/customers/${seg(a.id)}`),
     },

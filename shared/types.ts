@@ -574,9 +574,13 @@ export interface Customer {
   /** "install": the RevflareKit install; "purchase": the first transaction (no earlier install known). */
   firstSeenSource?: "install" | "purchase";
   firstPaidAt: number | null;
-  /** Latest of the app's activity (RevflareKit key events and reports), transactions (not after now) and store notifications (ms). */
+  /**
+   * When the customer last used the app (ms): the latest RevflareKit activity of their installs (any event, e.g. app_open;
+   * else key events and reports) or a purchase they made themselves (purchase, trial start, one-time purchase), whichever
+   * is later. Renewals, trial conversions and store notifications happen without the user and do not count.
+   */
   lastSeenAt: number;
-  /** "app": RevflareKit (key events / reports); "purchase": a transaction; "notification": an App Store / Google Play notification. */
+  /** "app": RevflareKit activity; "purchase": a purchase the user made; ("notification": older servers only). */
   lastSeenSource?: "app" | "purchase" | "notification";
   /** Install time of the customer's earliest linked RevflareKit install (ms), null when no install is linked. */
   installedAt?: number | null;
@@ -595,6 +599,47 @@ export interface Customer {
   transactions: Transaction[];
   /** Apple notification history of the customer's subscriptions and purchases, newest first (at most 100; Production only unless the customer is sandbox-only). */
   events?: CustomerEvent[];
+  /** RevflareKit install ids linked to the customer (newest activity first, at most 20). */
+  installIds?: string[];
+  /** What the customer did in the app lately: their latest sessions with the events of each (null: no install linked). */
+  activity?: CustomerActivity | null;
+}
+
+/**
+ * A customer's recent in-app activity (GET /customers/:id): the latest sessions of their linked installs, newest
+ * session first, each with its events in order (a funnel of what they did). source "events": every event (Analytics
+ * Engine, last 90 days); "key_events": only the exact key events (first_open, paywall_*, purchase_*, onboarding_*...)
+ * when event queries are not configured.
+ */
+export interface CustomerActivity {
+  source: "events" | "key_events";
+  /** Latest event of any linked install (ms). */
+  lastEventAt: number | null;
+  sessions: CustomerSession[];
+  /** More sessions exist than returned. */
+  truncated: boolean;
+}
+
+export interface CustomerSession {
+  /** RevflareKit session id ("" when the events carry none). */
+  sessionId: string;
+  installId: string;
+  startedAt: number;
+  endedAt: number;
+  appVersion: string | null;
+  /** production | sandbox | xcode */
+  environment: string | null;
+  /** Events oldest first; consecutive repeats of the same event and detail are folded into one with a count. */
+  events: CustomerSessionEvent[];
+}
+
+export interface CustomerSessionEvent {
+  name: string;
+  ts: number;
+  /** Promoted properties in words, e.g. "screen settings", "placement onboarding · product pro_yearly". */
+  detail: string | null;
+  /** Times it happened in a row (1 when once). */
+  count: number;
 }
 
 export interface AtRisk {

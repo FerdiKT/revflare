@@ -50,7 +50,7 @@ revflare breakdown --by app|country|product [--metric revenue] [--range 28d]
 revflare mrr-movement [--range 12m] [--interval month]
 revflare transactions [--kind new,conversion,renewal,trial,one_time] [--app X] [--country US] [--refunded] [--source apple_ads|google_ads|referral|organic|unknown] [--quick] [--limit 50] [--follow]
 revflare transactions --cancellations [--quick]    # auto-renew turned off (App Store / Google Play), newest first, with the time since the purchase
-revflare customer <id>                             # first / last seen (date + time, source), install time, install→buy / buy→cancel / buy→refund durations, quick flags, spend, subscriptions (auto-renew off = cancelled, with the date), transactions, notification history, acquisition
+revflare customer <id>                             # first / last seen (last seen = last time in the app or their own purchase, never renewals), recent activity (latest sessions as event flows: app_open → paywall_view → purchase_success), install time, install→buy / buy→cancel / buy→refund durations, quick flags, spend, subscriptions (auto-renew off = cancelled, with the date), transactions, notification history, acquisition
 revflare at-risk                                   # billing retry, grace period, auto-renew off
 revflare forecast [--days 30]
 revflare cohorts [--months 12] [--ltv]

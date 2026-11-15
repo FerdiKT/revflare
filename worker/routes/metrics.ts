@@ -1,4 +1,5 @@
 // Read endpoints: overview, charts, breakdowns, feed, customers, at-risk, forecast, cohorts, reconciliation, goals, alerts.
+import { analyticsActivity } from "../lib/customer-activity";
 import { alertExperimentId, alertFunnelId } from "../lib/alert-store";
 import { Hono, type Context } from "hono";
 import { INSTALL_SOURCES, LTV_DIMENSIONS, METRICS, type Alert, type Interval, type LtvCohortUnit, type LtvDimension, type Metric } from "../../shared/types";
@@ -109,7 +110,18 @@ metricRoutes.get("/transactions", read, async (c) => {
 
 metricRoutes.get("/customers/:id", read, async (c) => {
   const r = await customer(c.env, { ...scope(c), id: c.req.param("id") });
-  return r ? c.json(r) : c.json({ error: "Not found" }, 404);
+  if (!r) return c.json({ error: "Not found" }, 404);
+  // Every event of the customer's installs (app_open, screens...), when event queries are configured: a fuller activity
+  // than the key events, and the real last time they were in the app.
+  const full = r.installIds?.length ? await analyticsActivity(c.env, r.appId, r.installIds, Date.now()) : null;
+  if (full) {
+    r.activity = full;
+    if (full.lastEventAt && full.lastEventAt > r.lastSeenAt) {
+      r.lastSeenAt = full.lastEventAt;
+      r.lastSeenSource = "app";
+    }
+  }
+  return c.json(r);
 });
 
 metricRoutes.get("/at-risk", read, async (c) => c.json(await atRisk(c.env, { ...scope(c), limit: Number(c.req.query("limit")) || 100 })));
