@@ -12,7 +12,7 @@
 // requests).
 // Funnel anomaly / release regression checks and the daily digest (cronInsights in worker/lib/insights.ts) run every tick
 // as their own database call too: at most 40 outbound requests (Analytics Engine SQL API, alert pushes, digest emails)
-// and 10 funnels per tick, each funnel once a day; the hourly alert check (slot 2, :10) also raises events_silent from
+// and 2 funnels per tick, each funnel once a day (claimed before it runs); the hourly alert check (slot 2, :10) also raises events_silent from
 // the "last event" notes (no queries). The same call stops experiments after 90 days and, from 02:00 UTC, snapshots each
 // running experiment's daily exposures, and recomputes running experiments' results every 6 hours (at most 2 a tick,
 // within the daily background budget; worker/lib/experiments.ts).

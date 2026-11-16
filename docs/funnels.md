@@ -53,8 +53,9 @@ no other key event of the app in the same isolate goes unflagged: best effort.) 
   counter; a retried batch writes only the budget counter. On the Free plan (100,000 rows written a day, 55,000 for
   background work by default) that is roughly 18,000 key events a day for the whole instance: raise
   `BACKGROUND_WRITES_PER_DAY` on Workers Paid (the default cap follows it). Reads (`test/workers/sdk-key-events.test.ts`, "exact key-event read cost"): an
-  exact funnel, the funnel alerts and experiment exposures read about 3 rows per stored event of their steps in the
-  range; the events page reads the rollup (names × days) and the names' rows once (unique installs).
+  exact funnel and experiment exposures read about 3 rows per stored event of their steps in the range (the daily
+  funnel alert checks query Analytics Engine instead whenever event queries are configured: grouping 15 days of a large
+  app's events inside the database object took minutes of CPU); the events page reads the rollup (names × days) and the names' rows once (unique installs).
 - **Retention**: the cron deletes stored key events older than the app's retention (default 180 days, 7 to 365), at
   most 5,000 rows per tick through the `(app_id, name, ts)` index, once a day (and their day and rollup rows).
 
@@ -207,12 +208,14 @@ app, `revflare funnels <app> alerts <funnel> on|off --sensitivity high|normal|lo
   ago. One alert per version ("… (2.0.5 vs 2.0.2)"); a later daily check that finds no regression (or no version new
   any more) resolves the funnel's open regression alerts.
 
-Cost: the checks run in a database call of their own on every cron tick (`cronInsights`), at most 10 funnels per tick
+Cost: the checks run in a database call of their own on every cron tick (`cronInsights`), at most 2 funnels per tick
 (round-robin, settings `funnel_alerts_cursor`) and one budget of at most 40 outbound requests per tick shared by
 Analytics Engine SQL API queries (each event step is one query over 15 days of entries, step 1 broken down by app
-version; revenue steps are indexed database reads), the APNs pushes of the alerts raised (one per receiving device; a
+version; revenue steps are one indexed range read of the app's linked purchases per step and check, shared by the
+check's computations), the APNs pushes of the alerts raised (one per receiving device; a
 funnel is only started when there is room for its queries and two alerts' pushes) and digest emails (at most 10 per
-tick, never on a tick that checked funnels). Each funnel is checked once a day (`funnels.alerts_checked`); funnels
+tick, never on a tick that checked funnels). Each funnel is checked once a day (`funnels.alerts_checked`, set and made durable before the check, so a check that runs
+out of CPU waits for the next day instead of being retried every tick); funnels
 with alerts off, apps without events for two days, and funnels starting at `first_open` whose app had fewer than 100
 installs yesterday and fewer than 400 over 8 days (from the daily digest) cost no query. The hourly silence check reads
 the open `events_silent` alerts once and only writes for apps that have one. Without `CF_ACCOUNT_ID` /

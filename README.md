@@ -7,7 +7,7 @@
 purchase and subscription revenue tracker: it listens to **App Store Server Notifications V2**, verifies every signed
 transaction against Apple's root certificate and turns them into revenue, proceeds, MRR, churn, trials, cohorts and
 forecasts. It runs **entirely on Cloudflare** (one Worker, a Durable Object SQLite database, R2 and Workflows), with no
-servers to maintain, and fits the **Workers Free plan**.
+servers to maintain, and fits the **Workers Free plan** (Workers Paid lifts the daily limits).
 
 It replaces the RevenueCat *dashboard* (not its SDK or paywalls): keep RevenueCat in your apps if you like, import its
 history, and read every number from Apple. A native **iOS app** (widgets, Live Activity, a cash register sound on every
@@ -299,16 +299,23 @@ admins see "Update available"). Set the variable `UPDATE_CHECK = "false"` to tur
 Database migrations run automatically when the database object starts after the deploy (it can keep running the
 previous code for a few minutes).
 
-## How it runs on the Free plan
+## How it runs (Free plan and Workers Paid)
 
 - **One Worker** serves the React app, the REST API, the MCP server, Apple's notifications and RevflareKit reports.
 - **The database is SQLite inside one Durable Object** (`RevflareDatabase`); heavy work (JWS verification, syncs,
-  rollups) runs inside it, where it gets 30 s of CPU instead of the Worker's ~10 ms. Binding a D1 database as `D1`
-  switches to D1 without code changes.
-- **Free plan database budget** (5M rows read / 100k written a day): metrics are precomputed incrementally, reads are
-  cached, and background work (imports, backfills, history syncs, stored key events) has its own capped daily budget, so new sales and
-  dashboards keep working. Settings → Usage shows the numbers; on Workers Paid raise the caps with
-  `BACKGROUND_READS_PER_DAY` / `BACKGROUND_WRITES_PER_DAY`.
+  rollups, funnel alert checks) runs inside it, where it gets 30 s of CPU per call by default instead of the Worker's
+  ~10 ms (Free plan). The object handles one call at a time: a call that runs past its CPU limit resets the object and
+  fails every request in flight with it, so background work is cut into bounded steps (a few funnels or experiments a
+  cron tick, each marked as started before it runs so a failing one is not retried every tick). Binding a D1 database
+  as `D1` switches to D1 without code changes.
+- **Free plan**: 5M rows read / 100k written a day for the database (over it every request fails until 00:00 UTC).
+  Metrics are precomputed incrementally, reads are cached, and background work (imports, backfills, history syncs,
+  stored key events) has its own capped daily budget (`BACKGROUND_READS_PER_DAY` / `BACKGROUND_WRITES_PER_DAY`,
+  defaults 2.5M / 55k), so new sales and dashboards keep working. Settings → Usage shows the numbers.
+- **Workers Paid**: no daily row limit (rows read and written are billed beyond the monthly allowance), so raise the
+  background caps in your `wrangler.local.jsonc` vars (e.g. 200M reads / 1M writes) and the CPU limit per call with
+  `"limits": { "cpu_ms": 120000 }` (up to 300000; applies to the Worker and the database object). A higher CPU limit is
+  a safety margin, not a budget: one long call still holds the database for its whole duration.
 - **One cron trigger** (every 5 minutes; Free accounts share five) picks its work by slot and stays under the
   subrequest limit: rollups, Notification History polling, transaction history backlogs, alerts, FX rates, Sales
   reports and the daily update check. Long imports run as **Workflows**, one bounded step at a time.

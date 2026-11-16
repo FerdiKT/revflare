@@ -32,7 +32,7 @@ import { assembleDigest, digestEmail, digestEventsOf, digestKey, readDigest, typ
 import { emailBinding, sendError, sender } from "./email";
 import { cronExperiments } from "./experiments";
 import { eventsBinding } from "./events";
-import { computeFunnel, funnelAlertsOf, NO_VALUE, revenueStepData, STEP_INSTALL_CAP, stepLabel, toFunnel, toStepData, type FunnelRow, type StepData, type StepSource } from "./funnels";
+import { computeFunnel, funnelAlertsOf, NO_VALUE, revenueStepDataAll, STEP_INSTALL_CAP, stepLabel, toFunnel, toStepData, type FunnelRow, type StepData, type StepSource } from "./funnels";
 import { FxCache, addDays, dayOf } from "./money";
 import { apnsConfigured, localParts, parsePrefs, pushRecipients, type SendBudget } from "./push";
 import { baseUrl, getSetting, setSetting } from "./settings";
@@ -61,7 +61,11 @@ const DAY = 24 * HOUR;
  * under the Workers subrequest limit.
  */
 export const MAX_REQUESTS_PER_TICK = 40;
-export const MAX_FUNNELS_PER_TICK = 10;
+/**
+ * Funnel checks a tick: few, because one check can take seconds of database CPU (up to 15 days of exact key events per
+ * step, computed several times). Each tick is its own request with its own CPU limit; ~40 funnels take a few hours.
+ */
+export const MAX_FUNNELS_PER_TICK = 2;
 /** Funnel checks start at 10:00 UTC: yesterday's installs had at least 10 hours to convert, late events arrived. */
 const FUNNEL_CHECK_HOUR = 10;
 /** Anomaly: entries of each day's last 3 hours are left out (events queued offline arrive late). */
@@ -200,11 +204,20 @@ export interface FunnelCheck {
   skipped: string[];
 }
 
-function sourcesFor(env: Env, funnel: { appId: string; steps: FunnelStep[] }, eventData: (StepData | null)[], first: StepData, fromMs: number, toMs: number): StepSource[] {
+/**
+ * Step sources of one check. Revenue steps are read once per check for every linked install (revenueStepDataAll) and
+ * shared by all of the check's computations (yesterday, baseline, weekdays, versions): reading them per computation
+ * and per 90 installs cost thousands of statements a funnel on large apps and ran the database object out of CPU.
+ */
+function sourcesFor(env: Env, funnel: { appId: string; steps: FunnelStep[] }, eventData: (StepData | null)[], first: StepData, fromMs: number, toMs: number, revenue: Map<number, Promise<StepData>>): StepSource[] {
   return funnel.steps.map((s, i) => {
     if (i === 0) return first;
     if (s.type === "event") return eventData[i]!;
-    return async (installs: string[]) => new Map(await revenueStepData(env, { appId: funnel.appId, installs, kind: s.kind, fromMs, toMs }));
+    return async () => {
+      let p = revenue.get(i);
+      if (!p) revenue.set(i, (p = revenueStepDataAll(env, { appId: funnel.appId, kind: s.kind, fromMs, toMs }).then((rows) => new Map(rows))));
+      return p;
+    };
   });
 }
 
@@ -223,8 +236,10 @@ export async function checkFunnel(env: Env, db: Db, row: CheckRow, at: number, b
   const endMs = Math.floor(at / 300_000) * 300_000;
   const windowMs = funnel.windowSeconds * 1000;
   const test = { excludedInstalls: parseTestInstalls(row.test_installs) };
-  // Exact key events when they cover the 15 days (worker/lib/key-events.ts), else one Analytics Engine query per step.
-  const exact = await exactFunnelSteps(db, {
+  // One Analytics Engine query per step: it groups the 15 days of events by install on its side. The exact key events
+  // (worker/lib/key-events.ts) only when event queries are not configured: grouping them inside the database object took
+  // minutes of CPU on large apps (hundreds of thousands of rows a step) and reset the object.
+  const exact = analyticsMissing(env).query ? null : await exactFunnelSteps(db, {
     appId: funnel.appId,
     steps: funnel.steps.map((s, i) => (s.type === "event" ? { name: s.name, filters: s.filters, fromMs: rangeFrom, toMs: endMs, breakdown: i === 0 ? "app_version" : null } : null)),
     fromDay: dayOf(rangeFrom),
@@ -248,7 +263,8 @@ export async function checkFunnel(env: Env, db: Db, row: CheckRow, at: number, b
   const out: FunnelCheck = { funnelId: funnel.id, anomaly: null, regression: null, skipped: [] };
   const label = (k: number) => stepLabel(funnel.steps[k]);
   const app = row.app_name;
-  const compute = (entries: StepData, windowMs: number) => computeFunnel(sourcesFor(env, funnel, eventData, entries, rangeFrom, endMs), { windowMs, ordered: funnel.ordered });
+  const revenue = new Map<number, Promise<StepData>>();
+  const compute = (entries: StepData, windowMs: number) => computeFunnel(sourcesFor(env, funnel, eventData, entries, rangeFrom, endMs, revenue), { windowMs, ordered: funnel.ordered });
 
   // Anomaly: yesterday against the 14 days before and against the same weekday(s) in them. Entries of the last 3 hours
   // of each day are left out (events queued offline on devices arrive late), on every day alike.
@@ -397,6 +413,11 @@ async function checkFunnels(env: Env, db: Db, at: number, budget: TickBudget, ma
       log.more = true;
       break;
     }
+    // Claimed before the check: a check that never finishes (the database object reset for exceeding its CPU limit)
+    // is not retried every tick for the rest of the day; it waits for tomorrow.
+    await db.prepare("UPDATE funnels SET alerts_checked = ? WHERE id = ?").bind(today, id).run();
+    await db.flush?.();
+    console.log(JSON.stringify({ event: "funnel_check_start", funnel: id, app: row.app_id, steps: toFunnel(row).steps.length }));
     try {
       const r = await checkFunnel(env, db, row, at, budget);
       if (r.anomaly) log.anomalies++;
@@ -404,7 +425,6 @@ async function checkFunnels(env: Env, db: Db, at: number, budget: TickBudget, ma
     } catch (err) {
       log.errors.push(`${id}: ${errorMessage(err)}`);
     }
-    await db.prepare("UPDATE funnels SET alerts_checked = ? WHERE id = ?").bind(today, id).run();
     cursor = id;
     log.checked++;
   }

@@ -87,22 +87,26 @@ export default {
   },
   async scheduled(event, env, ctx) {
     await ensureSchema(env);
+    // Per-tick database calls that take long (they hold the single database object): logged with their wall time.
+    const t0 = Date.now();
+    const timed = <T>(name: string, p: Promise<T>) =>
+      p.finally(() => Date.now() - t0 > 10_000 && console.warn(JSON.stringify({ event: "cron_call_slow", call: name, ms: Date.now() - t0 })));
     ctx.waitUntil(
-      cronTick(env, { at: event.scheduledTime }).then(
+      timed("tick", cronTick(env, { at: event.scheduledTime })).then(
         (log) => console.log(JSON.stringify({ event: "cron", ...log })),
         (err) => console.error("cron failed", err),
       ),
     );
     // Meta Ads: queued purchases to the Conversions API, a database call of its own (own subrequest budget).
     ctx.waitUntil(
-      sendMetaEvents(env, {}).then(
+      timed("meta", sendMetaEvents(env, {})).then(
         (log) => Object.keys(log).length && console.log(JSON.stringify({ event: "cron_meta", ...log })),
         (err) => console.error("cron meta failed", err),
       ),
     );
     // Refund requests: answers to Apple's CONSUMPTION_REQUESTs (a few requests, its own database call).
     ctx.waitUntil(
-      sendConsumptionInfo(env, {}).then(
+      timed("refunds", sendConsumptionInfo(env, {})).then(
         (log) => (log.requests || log.skipped || log.expired) && console.log(JSON.stringify({ event: "cron_refunds", ...log })),
         (err) => console.error("cron refunds failed", err),
       ),
@@ -110,7 +114,7 @@ export default {
     // Funnel anomaly / release regression checks and the daily digest: Analytics Engine queries, alert pushes and digest
     // emails (one request budget per tick) in a database call of their own.
     ctx.waitUntil(
-      cronInsights(env, { at: event.scheduledTime }).then(
+      timed("insights", cronInsights(env, { at: event.scheduledTime })).then(
         (log) =>
           Object.entries(log).some(([k, v]) => k !== "requests" && k !== "subrequests" && !(v && typeof v === "object" && "done" in v)) &&
           console.log(JSON.stringify({ event: "cron_insights", ...log })),

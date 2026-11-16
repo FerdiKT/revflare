@@ -854,6 +854,13 @@ export async function cronExperiments(env: Env, db: Db, at: number, budget: Send
       break;
     }
     computed++;
+    // Claimed before the computation (and made durable): one that never finishes (the database object reset for
+    // exceeding its CPU limit) waits RESULTS_INTERVAL_MS instead of being retried every tick.
+    if (r.status === "running") {
+      await db.prepare("UPDATE experiments SET results_at = ? WHERE id = ? AND COALESCE(results_at, 0) < ?").bind(at, r.id, at).run();
+      await db.flush?.();
+    }
+    console.log(JSON.stringify({ event: "experiment_results_start", experiment: r.id, app: r.app_id }));
     try {
       const out = await computeExperimentResults(env, { workspaceId: r.workspace_id, experimentId: r.id, at, mode: "cron" });
       if (out.status !== 200) errors.push(`${r.id} results: ${out.error}`);

@@ -370,6 +370,29 @@ export const revenueStepData = defineDbFunction(
   },
 );
 
+/**
+ * The same for every linked install of the app at once: one range read of the app's transactions (idx_tx_app_time) and
+ * a primary-key lookup of their install link each, instead of one statement per 90 installs. Used by the funnel alert
+ * checks (worker/lib/insights.ts), which compute each funnel several times over thousands of installs.
+ */
+export const revenueStepDataAll = defineDbFunction(
+  "funnels.revenueAll",
+  async (db, args: { appId: string; kind: RevenueStepKind; fromMs: number; toMs: number }): Promise<[string, StepHit][]> => {
+    const kind = KIND_SQL[args.kind];
+    if (!kind) throw new Error("Unknown revenue step");
+    const { results } = await db
+      .prepare(
+        `SELECT l.install_id AS install, MIN(t.purchased_at) AS first, MAX(t.purchased_at) AS last, COUNT(*) AS n
+         FROM transactions t JOIN install_links l ON l.app_id = t.app_id AND l.original_transaction_id = t.original_transaction_id
+         WHERE t.app_id = ? AND t.purchased_at >= ? AND t.purchased_at < ? AND ${kind}
+         GROUP BY l.install_id`,
+      )
+      .bind(args.appId, args.fromMs, args.toMs)
+      .all<{ install: string; first: number; last: number; n: number }>();
+    return results.map((r) => [r.install, { first: r.first, last: r.last, n: r.n }]);
+  },
+);
+
 // --- Report ---------------------------------------------------------------------------------------------------------
 
 const reportCache = new Map<string, { report: FunnelReport; expires: number }>();

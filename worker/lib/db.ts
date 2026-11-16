@@ -29,6 +29,12 @@ export interface Stmt {
 export interface Db {
   prepare(sql: string): Stmt;
   batch<T = unknown>(statements: Stmt[]): Promise<Result<T>[]>;
+  /**
+   * Makes the writes so far durable now. Inside the database object, writes made without real I/O in between are
+   * committed together when the call yields: a call reset for exceeding its CPU limit loses them. Call it before heavy
+   * work whose "started" mark must survive (e.g. funnel checks). No-op on D1 (every statement commits).
+   */
+  flush?(): Promise<void>;
 }
 
 type Mode = "all" | "first" | "run";
@@ -41,6 +47,7 @@ export interface Query {
 
 interface Executor {
   exec(queries: Query[], transaction: boolean): Promise<Result<unknown>[]>;
+  flush?(): Promise<void>;
 }
 
 function toSqlValue(v: unknown): SqlValue {
@@ -87,6 +94,10 @@ class SqlStmt implements Stmt {
 class SqlDb implements Db {
   constructor(private readonly executor: Executor) {}
 
+  async flush(): Promise<void> {
+    await this.executor.flush?.();
+  }
+
   prepare(sql: string): Stmt {
     return new SqlStmt(this.executor, sql);
   }
@@ -121,6 +132,7 @@ function localExecutor(storage: DurableObjectStorage): Executor {
       if (!transaction || queries.length === 1) return queries.map((q) => execLocal(storage.sql, q));
       return storage.transactionSync(() => queries.map((q) => execLocal(storage.sql, q)));
     },
+    flush: () => storage.sync(),
   };
 }
 

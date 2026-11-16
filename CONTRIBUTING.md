@@ -61,6 +61,11 @@ Rollups are incremental, reads are cached, background work is metered (`worker/l
 `test/workers/budget.test.ts` guards the cost of a sale and of a cached read. Never scan `transactions` in recurring
 work. There is one cron trigger (`*/5`); do not add more (accounts share five).
 
+Whatever the plan, the database object runs one call at a time and is reset when a call exceeds its CPU limit (30 s by
+default; Workers Paid deployments raise it with `limits.cpu_ms`), failing every request in flight. Recurring work takes a
+few items a cron tick, marks each as started and makes that durable (`db.flush()`) before the heavy part, so an item
+that fails is not retried every tick, and leaves grouping of large event sets to Analytics Engine.
+
 ## Database changes
 
 Add a new `migrations/000N_*.sql` file; never edit an existing one. Migrations are applied automatically when the
