@@ -224,7 +224,7 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
       description:
         "App Store downloads from Apple's Sales and Trends reports (report days are Pacific time, about a day behind; a preset range ends at the newest report day): first-time downloads (free + paid), redownloads and updates per day, " +
         "per app (ranking with the previous period and 7 / 28 / 90-day windows vs the windows before), per country (all) and per device (iPhone, iPad, Mac...), plus conversions from Revflare's own data: " +
-        "trials started, new payers, revenue, download → trial, download → paid, revenue per download (RPD) and RevflareKit's Apple Ads installs (appleAdsShare: of the downloads of apps with RevflareKit installs; the rest is organic). " +
+        "trials started, new payers, revenue, download → trial, download → paid, revenue per download (RPD) and RevflareKit's Apple Ads installs (appleAdsShare: of the first installs RevflareKit saw; the rest is organic). " +
         "Apps not added to Revflare count in the workspace totals (appId null). firstDay null = no reports imported yet (sync_downloads).",
       inputSchema: { type: "object", properties: { ...rangeProps, currency: { type: "string" } } },
       run: (c, a) => call(c, "GET", `/downloads${query(a, ["range", "from", "to", "apps", "currency"])}`),

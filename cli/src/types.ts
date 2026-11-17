@@ -2052,7 +2052,7 @@ export interface DownloadConversions {
   revenuePerDownload: number | null;
   /** First-time installs RevflareKit attributed to Apple Ads (production; apps with RevflareKit only). */
   appleAdsDownloads: number;
-  /** appleAdsDownloads / downloads of the apps with RevflareKit installs; null when none. */
+  /** appleAdsDownloads / first installs RevflareKit saw (production); the rest is organic. null without RevflareKit installs. */
   appleAdsShare: number | null;
 }
 

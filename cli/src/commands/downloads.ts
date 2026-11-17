@@ -40,7 +40,7 @@ export function downloadsReport(d: Downloads, by: DownloadsBy, limit?: number): 
   );
   lines.push(
     `→ ${fmtNum(t.trialsStarted)} trials (${fmtPct(t.downloadToTrial)}) · ${fmtNum(t.newPayers)} new payers (${fmtPct(t.downloadToPaid)}) · ${m(t.revenue)} revenue · RPD ${t.revenuePerDownload === null ? "-" : fmtMoney(t.revenuePerDownload, d.currency)}` +
-      (t.appleAdsShare === null ? "" : ` · Apple Ads ${fmtNum(t.appleAdsDownloads)} (${fmtPct(t.appleAdsShare, 1)} of SDK apps' downloads)`),
+      (t.appleAdsShare === null ? "" : ` · Apple Ads ${fmtNum(t.appleAdsDownloads)} (${fmtPct(t.appleAdsShare, 1)} of RevflareKit installs)`),
   );
   lines.push(c.gray(`Windows to ${d.lastDay ?? "-"}: ${d.windows.map((w) => `${w.days}d ${windowCell(w)}`).join(" · ")}`));
   lines.push(`${c.gray("Daily")} ${sparkline(d.days.map((x) => x.downloads))}`);
@@ -111,7 +111,7 @@ export const downloadsCmd: Command = {
     "From Apple's Sales and Trends daily reports (report days are Pacific time, about a day behind: a preset --range ends at\n" +
     "the newest report day). First downloads = Product Type 1* / F1 (free + paid), redownloads 3* / F3, updates 7* / F7.\n" +
     "Conversions come from Revflare's own sales: trials started, new payers (first payment), revenue per download (RPD),\n" +
-    "and Apple Ads installs RevflareKit attributed (ADS: share of the downloads of apps with RevflareKit installs).\n" +
+    "and Apple Ads installs RevflareKit attributed (ADS: share of the installs RevflareKit saw).\n" +
     "Apps of the developer account that are not in Revflare count in the totals.",
   options: {
     ...RANGE_OPTIONS,

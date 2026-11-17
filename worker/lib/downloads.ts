@@ -29,10 +29,10 @@ interface Raw {
   revenueUsd: number;
   proceedsUsd: number;
   ads: number;
-  /** Downloads of apps with RevflareKit installs (the base of the Apple Ads share). */
-  sdkDownloads: number;
+  /** First installs RevflareKit saw (the base of the Apple Ads share). */
+  sdkInstalls: number;
 }
-const emptyRaw = (): Raw => ({ trials: 0, payers: 0, revenueUsd: 0, proceedsUsd: 0, ads: 0, sdkDownloads: 0 });
+const emptyRaw = (): Raw => ({ trials: 0, payers: 0, revenueUsd: 0, proceedsUsd: 0, ads: 0, sdkInstalls: 0 });
 
 const ratio = (n: number, d: number, digits = 4) => (d > 0 ? Math.round((n / d) * 10 ** digits) / 10 ** digits : null);
 
@@ -47,7 +47,7 @@ function conversions(downloads: number, r: Raw, rate: number): DownloadConversio
     downloadToPaid: ratio(r.payers, downloads),
     revenuePerDownload: downloads > 0 ? Math.round((revenue / downloads) * 1000) / 1000 : null,
     appleAdsDownloads: r.ads,
-    appleAdsShare: ratio(r.ads, r.sdkDownloads),
+    appleAdsShare: ratio(r.ads, r.sdkInstalls),
   };
 }
 
@@ -142,7 +142,6 @@ export const downloads = cachedFn("downloads", async (db: Db, args: Scope & { fr
   const raw = (map: Map<string, Raw>, key: string) => map.get(key) ?? map.set(key, emptyRaw()).get(key)!;
   const t0 = dayStart(from);
   const t1 = dayStart(addDays(to, 1));
-  const sdkApps = new Set<string>();
   for (let i = 0; i < iosApps.length; i += CHUNK) {
     const ids = iosApps.slice(i, i + CHUNK);
     const list = inList(ids.length);
@@ -171,10 +170,11 @@ export const downloads = cachedFn("downloads", async (db: Db, args: Scope & { fr
       raw(rawByDay, p.day).payers += p.n;
       raw(rawByApp, p.app_id).payers += p.n;
     }
-    // First-time installs RevflareKit saw (production), and those Apple attributed to Apple Ads (not redownloads).
+    // Installs RevflareKit saw (production; redownloads Apple flagged left out), and those Apple attributed to Apple Ads.
     const { results: installs } = await db
       .prepare(
-        `SELECT a.app_id, date(COALESCE(a.installed_at, a.created_at) / 1000, 'unixepoch') AS day, COUNT(*) AS installs,
+        `SELECT a.app_id, date(COALESCE(a.installed_at, a.created_at) / 1000, 'unixepoch') AS day,
+           SUM(CASE WHEN COALESCE(a.conversion_type, '') != 'Redownload' THEN 1 ELSE 0 END) AS installs,
            SUM(CASE WHEN a.attributed = 1 AND COALESCE(a.conversion_type, '') != 'Redownload' THEN 1 ELSE 0 END) AS ads
          FROM attributions a
          WHERE a.workspace_id = ? AND a.created_at >= ? AND a.created_at < ? AND a.app_id IN (${list}) AND ${PRODUCTION_INSTALL("a")} AND ${NOT_TEST_ATTRIBUTION("a")}
@@ -184,18 +184,11 @@ export const downloads = cachedFn("downloads", async (db: Db, args: Scope & { fr
       .all<{ app_id: string; day: string; installs: number; ads: number }>();
     for (const r of installs) {
       if (r.day < from || r.day > to) continue;
-      sdkApps.add(r.app_id);
-      raw(rawByDay, r.day).ads += r.ads;
-      raw(rawByApp, r.app_id).ads += r.ads;
+      for (const x of [raw(rawByDay, r.day), raw(rawByApp, r.app_id)]) {
+        x.ads += r.ads;
+        x.sdkInstalls += r.installs;
+      }
     }
-  }
-  // The Apple Ads share counts only the downloads of apps with RevflareKit installs.
-  let sdkTotal = 0;
-  for (const a of apps.values()) {
-    if (!a.appId || !sdkApps.has(a.appId)) continue;
-    sdkTotal += a.counts.downloads;
-    raw(rawByApp, a.appId).sdkDownloads = a.counts.downloads;
-    for (const [day, n] of a.firstByDay) if (day >= from && day <= to) raw(rawByDay, day).sdkDownloads += n;
   }
   const totalRaw = emptyRaw();
   for (const r of rawByApp.values()) {
@@ -204,8 +197,8 @@ export const downloads = cachedFn("downloads", async (db: Db, args: Scope & { fr
     totalRaw.revenueUsd += r.revenueUsd;
     totalRaw.proceedsUsd += r.proceedsUsd;
     totalRaw.ads += r.ads;
+    totalRaw.sdkInstalls += r.sdkInstalls;
   }
-  totalRaw.sdkDownloads = sdkTotal;
 
   const days: DownloadDay[] = [...dayCounts.entries()].map(([day, c]) => ({ day, ...c, ...conversions(c.downloads, rawByDay.get(day) ?? emptyRaw(), rate) }));
 

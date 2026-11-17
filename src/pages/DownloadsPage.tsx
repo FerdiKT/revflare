@@ -113,8 +113,8 @@ export function DownloadsPage() {
             </div>
           </div>
           <p className="mt-5 text-xs text-zinc-500">
-            Reports {dayLabel(d.firstDay ?? d.from)} → {dayLabel(d.lastDay ?? d.to)}. Conversions use Revflare's own sales on UTC days (iOS apps); Apple Ads counts RevflareKit's attributed first installs, as a
-            share of the downloads of apps with RevflareKit installs. Where visitors come from: <Link to="/acquisition" className="font-medium text-brand-700 hover:underline dark:text-brand-400">Acquisition</Link>.{" "}
+            Reports {dayLabel(d.firstDay ?? d.from)} → {dayLabel(d.lastDay ?? d.to)}. Conversions use Revflare's own sales on UTC days (iOS apps); Apple Ads share = RevflareKit's Apple Ads installs
+            out of all installs RevflareKit saw. Where visitors come from: <Link to="/acquisition" className="font-medium text-brand-700 hover:underline dark:text-brand-400">Acquisition</Link>.{" "}
             <SyncButton inline />
           </p>
         </>

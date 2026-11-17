@@ -308,7 +308,7 @@ first downloads (free + paid), redownloads and updates per app (ranking with the
 Mac). Report days are Pacific time and arrive about a day late: a preset `--range` ends at the newest report day
 (`lastDay`), so say "the last 7 report days up to <lastDay>". Conversions come from Revflare's own sales (iOS apps, UTC
 days): trials started and new payers per first download, revenue per download (RPD), and Apple Ads installs
-RevflareKit attributed (`appleAdsShare` is over the downloads of apps with RevflareKit installs only; the rest is
+RevflareKit attributed (`appleAdsShare` is over the installs RevflareKit saw, not all downloads; the rest is
 organic). Apps of the developer account that are not in Revflare are in the totals with `appId: null` (no conversions).
 `firstDay` null → nothing imported: `revflare downloads sync` (needs a key with the Sales role and the vendor number).
 `--json` returns everything at once (`days`, `apps`, `countries`, `devices`, `windows`).
