@@ -417,7 +417,7 @@ function CountriesCard({ d, className }: { d: Downloads; className?: string }) {
       <CardHeader title="Countries" description={`${fullNumber(d.countries.length)} countries with downloads, redownloads or updates in the range.`} />
       <div className="space-y-2 px-5 pb-5">
         {top.map((c) => (
-          <div key={c.country} className="grid grid-cols-[9rem_1fr_4.5rem] items-center gap-3 text-sm">
+          <div key={c.country} className="grid grid-cols-[10rem_1fr_6.5rem] items-center gap-3 text-sm">
             <span className="truncate">{countryLabel(c.country)}</span>
             <InlineBar value={c.downloads} max={max} color={PALETTE[0]} />
             <span className="text-right tabular-nums">
