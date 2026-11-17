@@ -17,7 +17,7 @@ import { remoteConfig } from "./commands/remote-config.js";
 import { experiments } from "./commands/experiments.js";
 import { events, funnels } from "./commands/events.js";
 import { alerts, alertsResolve, goals, goalsAdd, goalsArchive, goalsEdit, goalsList, goalsRemove, goalsRemoveAlias, goalsReorder, goalsShow, jobs, jobsCancel, jobsShow } from "./commands/manage.js";
-import { atRisk, breakdown, chart, cohorts, forecast, mrrMovement, overview, revenueDaily } from "./commands/metrics.js";
+import { atRisk, breakdown, chart, cohorts, forecast, insights, mrrMovement, overview, revenueDaily } from "./commands/metrics.js";
 import { importRevenuecatCharts } from "./commands/rccharts.js";
 import { skillInstall } from "./commands/skill.js";
 import { customer, transactions } from "./commands/transactions.js";
@@ -35,6 +35,7 @@ export const COMMANDS: Command[] = [
   mcp,
   skillInstall,
   overview,
+  insights,
   apps,
   app,
   googlePlay,
@@ -95,7 +96,7 @@ export const COMMANDS: Command[] = [
 
 const GROUPS: Array<[string, string[]]> = [
   ["Setup", ["login", "logout", "whoami", "version", "mcp", "skill install"]],
-  ["Revenue", ["overview", "apps", "app", "chart", "breakdown", "mrr-movement", "revenue-daily"]],
+  ["Revenue", ["overview", "insights", "apps", "app", "chart", "breakdown", "mrr-movement", "revenue-daily"]],
   ["Google Play (Android)", ["google-play"]],
   ["Polar (web)", ["polar"]],
   ["Customers & sales", ["transactions", "customer", "at-risk", "forecast", "cohorts"]],

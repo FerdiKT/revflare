@@ -2,7 +2,7 @@
 import { analyticsActivity } from "../lib/customer-activity";
 import { alertExperimentId, alertFunnelId } from "../lib/alert-store";
 import { Hono, type Context } from "hono";
-import { INSTALL_SOURCES, LTV_DIMENSIONS, METRICS, type Alert, type Interval, type LtvCohortUnit, type LtvDimension, type Metric } from "../../shared/types";
+import { INSTALL_SOURCES, LTV_DIMENSIONS, METRICS, type Alert, type Insights, type Interval, type LtvCohortUnit, type LtvDimension, type Metric } from "../../shared/types";
 import { reconciliation } from "../apple/sales";
 import { listAdsNames, parseAdsNames, putAdsNames } from "../lib/ads-names";
 import { attributedRevenue } from "../lib/attribution";
@@ -58,6 +58,13 @@ function interval(c: Ctx, from: string, to: string): Interval {
 metricRoutes.get("/overview", read, async (c) => {
   const tz = c.req.query("tzOffset");
   return c.json(await overview(c.env, { ...scope(c), ...(tz && Number.isFinite(Number(tz)) ? { tzOffset: Number(tz) } : {}) }));
+});
+
+/** Rule-based insights of the overview (the same list as `Overview.insights`). */
+metricRoutes.get("/insights", read, async (c) => {
+  const tz = c.req.query("tzOffset");
+  const o = await overview(c.env, { ...scope(c), ...(tz && Number.isFinite(Number(tz)) ? { tzOffset: Number(tz) } : {}) });
+  return c.json({ currency: o.currency, asOf: o.asOf, items: o.insights ?? [] } satisfies Insights);
 });
 
 metricRoutes.get("/charts/:metric", read, async (c) => {

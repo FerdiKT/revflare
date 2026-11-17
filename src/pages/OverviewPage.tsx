@@ -1,6 +1,6 @@
 import { Link } from "react-router";
-import { AlertTriangle, ArrowRight, Award, CalendarCheck, Info, LifeBuoy, PartyPopper, Plus, Sparkles, Target, TrendingUp, XOctagon } from "lucide-react";
-import type { Alert, Kpi, Overview } from "@shared/types";
+import { AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, Award, CalendarCheck, ChevronRight, Crown, Flag, Hourglass, Info, LifeBuoy, PartyPopper, Plus, Sparkles, Target, TrendingUp, Undo2, UserPlus, XOctagon } from "lucide-react";
+import type { Alert, Insight, Kpi, Overview } from "@shared/types";
 import { ChartSkeleton, Legend, ProgressRing, Sparkline, TimeChart } from "../components/charts";
 import { FilterBar } from "../components/FilterBar";
 import { AppIcon } from "../components/Logo";
@@ -39,6 +39,7 @@ export function OverviewPage() {
           <ForecastCard d={d} />
         </div>
       </div>
+      <InsightsCard insights={d?.insights} />
       <KpiGrid kpis={d?.kpis} currency={d?.currency ?? "USD"} />
       <div className="mt-5 grid gap-5 lg:grid-cols-3 lg:items-start [&>*]:min-w-0">
         <MrrCard scopeKey={key} />
@@ -135,9 +136,103 @@ function TodayCard({ d }: { d: Overview | undefined }) {
               <TodayStat label="Trials started" value={fullNumber(t.trialsStarted)} />
               <TodayStat label="Refunds" value={fullNumber(t.refunds)} warn={t.refunds > 0} />
             </dl>
+            <TodayApps d={d} />
           </>
         )}
       </div>
+    </Card>
+  );
+}
+
+/** Today per app (top five by revenue), under the day's totals. */
+function TodayApps({ d }: { d: Overview }) {
+  const apps = (d.todayApps ?? []).filter((a) => a.revenue || a.sales || a.trialsStarted || a.refunds);
+  if (apps.length < 2) return null;
+  return (
+    <ul className="-mx-2 grid gap-x-6 border-t border-zinc-100 pt-3 sm:grid-cols-2 dark:border-zinc-800">
+      {apps.slice(0, 6).map((a) => {
+        const before = a.yesterdaySameTimeRevenue ?? a.yesterdayRevenue;
+        const parts = [a.sales && `${a.sales} sales`, a.trialsStarted && `${a.trialsStarted} trials`, a.refunds && `${a.refunds} refunds`].filter(Boolean);
+        return (
+          <li key={a.appId}>
+            <Link to={`/apps/${a.appId}`} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+              <AppIcon name={a.name} url={a.iconUrl} size={26} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{a.name}</span>
+                <span className="block truncate text-xs text-zinc-500">{parts.join(" · ") || "No sales yet"}</span>
+              </span>
+              <span className="text-right">
+                <span className="block text-sm font-semibold tabular-nums">{money(a.revenue, d.currency)}</span>
+                {before > 0 && <Delta change={a.revenue / before - 1} />}
+              </span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+const INSIGHT_ICON: Record<string, typeof Sparkles> = {
+  today_top_app: Crown,
+  month_pace: Flag,
+  refund_spike: Undo2,
+  trial_conversion_week: Hourglass,
+  new_customers_week: UserPlus,
+};
+
+function insightHref(i: Insight): string | null {
+  switch (i.link.type) {
+    case "app":
+      return `/apps/${i.link.appId}`;
+    case "chart":
+      return `/charts?metric=${i.link.metric}`;
+    case "goal":
+    case "goals":
+      return "/settings/goals";
+  }
+}
+
+/** Rule-based insights from the server (worker/lib/overview-insights.ts): one sentence each, linked to the related page. */
+function InsightsCard({ insights }: { insights: Insight[] | undefined }) {
+  if (!insights?.length) return null;
+  return (
+    <Card className="mt-5">
+      <CardHeader title={<span className="flex items-center gap-1.5"><Sparkles className="size-4 text-brand-600 dark:text-brand-400" /> Insights</span>} description="What stands out in your numbers" />
+      <ul className="grid gap-x-4 px-2 pb-3 md:grid-cols-2">
+        {insights.map((i) => {
+          const Icon = INSIGHT_ICON[i.kind] ?? (i.tone === "negative" ? ArrowDownRight : i.tone === "positive" ? ArrowUpRight : Sparkles);
+          const tone =
+            i.tone === "positive"
+              ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400"
+              : i.tone === "negative"
+                ? i.kind === "refund_spike"
+                  ? "bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400"
+                  : "bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400"
+                : "bg-brand-50 text-brand-600 dark:bg-brand-950/50 dark:text-brand-400";
+          const href = insightHref(i);
+          const body = (
+            <>
+              <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-full", tone)}>
+                <Icon className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1 text-sm">{i.text}</span>
+              {href && <ChevronRight className="size-4 shrink-0 text-zinc-300 dark:text-zinc-600" />}
+            </>
+          );
+          return (
+            <li key={i.id}>
+              {href ? (
+                <Link to={href} className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                  {body}
+                </Link>
+              ) : (
+                <div className="flex items-center gap-3 px-3 py-2">{body}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </Card>
   );
 }

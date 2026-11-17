@@ -652,8 +652,83 @@ struct Overview: Codable, Sendable {
     var records: Records
     var topApps: [TopApp]
     var alerts: [RFAlert]
+    /// Today per app (nil from older servers).
+    var todayApps: [TodayApp]?
+    /// Rule-based insights, most important first (nil from older servers).
+    var insights: [Insight]?
 
     func kpi(_ id: String) -> Kpi? { kpis.first { $0.id == id } }
+}
+
+struct TodayApp: Codable, Hashable, Sendable, Identifiable {
+    var appId: String
+    var name: String
+    var iconUrl: String?
+    var platform: String?
+    var revenue: Double
+    var proceeds: Double
+    var sales: Int
+    var trialsStarted: Int
+    var refunds: Int
+    var yesterdayRevenue: Double
+    var yesterdayProceeds: Double
+    /// Yesterday up to the same time of day (servers that know it).
+    var yesterdaySameTimeRevenue: Double?
+    var yesterdaySameTimeProceeds: Double?
+    var id: String { appId }
+}
+
+/// A rule-based observation (`GET /insights`, `Overview.insights`). `text` is English; the app writes its own
+/// localized sentence from `kind` + `values` and falls back to `text` for kinds it does not know.
+struct Insight: Codable, Hashable, Sendable, Identifiable {
+    enum Value: Codable, Hashable, Sendable {
+        case number(Double)
+        case string(String)
+        case null
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if c.decodeNil() { self = .null }
+            else if let d = try? c.decode(Double.self) { self = .number(d) }
+            else { self = .string(try c.decode(String.self)) }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            switch self {
+            case .number(let d): try c.encode(d)
+            case .string(let s): try c.encode(s)
+            case .null: try c.encodeNil()
+            }
+        }
+    }
+
+    struct Link: Codable, Hashable, Sendable {
+        var type: String
+        var appId: String?
+        var metric: String?
+        var goalId: String?
+    }
+
+    var id: String
+    var kind: String
+    var tone: String
+    var score: Double
+    var text: String
+    var values: [String: Value]
+    var appId: String?
+    var appName: String?
+    var link: Link
+
+    func number(_ key: String) -> Double? {
+        if case .number(let d) = values[key] { return d }
+        return nil
+    }
+
+    func string(_ key: String) -> String? {
+        if case .string(let s) = values[key] { return s }
+        return nil
+    }
 }
 
 struct MrrMovement: Codable, Sendable {

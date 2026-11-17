@@ -384,6 +384,53 @@ export interface Overview {
   records: { bestDay: { date: string; revenue: number } | null; todayIsRecord: boolean; bestMonth: { date: string; revenue: number } | null };
   topApps: { appId: string; name: string; iconUrl: string | null; revenue28d: number; mrr: number; change: number | null; platform?: string }[];
   alerts: Alert[];
+  /** Today's numbers per app (same day as `today`), apps with activity today or yesterday, by today's revenue (at most 30). */
+  todayApps?: TodayApp[];
+  /** Rule-based observations on the data, most important first (at most 5; also GET /insights). */
+  insights?: Insight[];
+}
+
+export interface TodayApp {
+  appId: string;
+  name: string;
+  iconUrl: string | null;
+  platform?: string;
+  revenue: number;
+  proceeds: number;
+  sales: number;
+  trialsStarted: number;
+  refunds: number;
+  yesterdayRevenue: number;
+  yesterdayProceeds: number;
+  /** Yesterday up to the same time of day (local-day overviews, `tzOffset`): a fair comparison for a day still running. */
+  yesterdaySameTimeRevenue?: number;
+  yesterdaySameTimeProceeds?: number;
+}
+
+export type InsightKind = "today_top_app" | "month_pace" | "revenue_week" | "trial_conversion_week" | "refund_spike" | "app_mrr_change" | "churn_change" | "new_customers_week";
+
+/**
+ * A rule-based observation (worker/lib/overview-insights.ts, docs/api.md#insights): `text` is an English sentence;
+ * clients may write their own from `kind` + `values` (money values in the workspace currency, rates as fractions).
+ */
+export interface Insight {
+  id: string;
+  kind: InsightKind;
+  tone: "positive" | "negative" | "neutral";
+  /** Importance 0–100 (the list is sorted by it). */
+  score: number;
+  text: string;
+  values: Record<string, number | string | null>;
+  appId: string | null;
+  appName: string | null;
+  /** Where a tap leads: an app's page, a chart (metric), a goal, the goals list. */
+  link: { type: "app"; appId: string } | { type: "chart"; metric: Metric; appId?: string } | { type: "goal"; goalId: string } | { type: "goals" };
+}
+
+export interface Insights {
+  currency: string;
+  asOf: number;
+  items: Insight[];
 }
 
 export interface MrrMovement {

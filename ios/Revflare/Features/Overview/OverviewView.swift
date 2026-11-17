@@ -136,10 +136,14 @@ struct OverviewContent: View {
     var body: some View {
         let o = overview
         VStack(spacing: 16) {
-            TodayCard(overview: o, net: net, updatedAt: updatedAt, offline: offline)
+            TodayCard(overview: o, net: net, scopedToApp: scopedToApp, updatedAt: updatedAt, offline: offline)
 
             if !o.goals.filter(goalMatches).isEmpty || (scopedToApp == nil && model.overviewApps.isEmpty && model.canManage) {
                 GoalsStrip(goals: o.goals.filter(goalMatches), currency: o.currency)
+            }
+
+            if let insights = o.insights, !insights.isEmpty {
+                InsightsCard(insights: insights, currency: o.currency)
             }
 
             KpiGrid(overview: o, net: net)
@@ -192,6 +196,8 @@ struct OverviewContent: View {
 struct TodayCard: View {
     var overview: Overview
     var net: Bool
+    /// The app's own page: no per-app list.
+    var scopedToApp: String? = nil
     var updatedAt: Date?
     var offline: Bool
 
@@ -231,6 +237,10 @@ struct TodayCard: View {
                 StatChip(value: t.trialsStarted, title: "trials", systemImage: "hourglass")
                 if t.refunds > 0 { StatChip(value: t.refunds, title: "refunds", systemImage: "arrow.uturn.backward", tint: .red) }
             }
+            if scopedToApp == nil, let apps = overview.todayApps, apps.count > 1 {
+                Divider()
+                TodayAppsList(apps: apps, net: net, currency: overview.currency)
+            }
             Divider()
             HStack {
                 Text("Yesterday").foregroundStyle(.secondary)
@@ -268,62 +278,6 @@ private struct StatChip: View {
             Label(title, systemImage: systemImage).font(.caption2).foregroundStyle(tint).labelStyle(.titleOnly)
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// Overview goals: the first three with bars, a link to all of them; an invitation to add one when there are none.
-struct GoalsStrip: View {
-    @Environment(AppModel.self) private var model
-    var goals: [GoalProgress]
-    var currency: String
-    @State private var adding = false
-
-    private static let shown = 3
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                SectionHeader(title: "Goals", systemImage: "target")
-                NavigationLink(value: Route.goals) {
-                    Text(goals.count > Self.shown ? "See all (\(goals.count))" : "See all").font(.subheadline)
-                }
-            }
-            if goals.isEmpty {
-                Button {
-                    adding = true
-                } label: {
-                    HStack(spacing: 12) {
-                        ProgressRing(progress: 0.66, lineWidth: 5, color: .brand.opacity(0.5))
-                            .frame(width: 38, height: 38)
-                            .overlay { Image(systemName: "plus").font(.system(size: 14, weight: .bold)).foregroundStyle(Color.brand) }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Add a goal").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                            Text("Revenue, MRR, subscriptions or trials, for any period.").font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(goals.prefix(Self.shown).enumerated()), id: \.element.id) { i, g in
-                        if i > 0 { Divider() }
-                        NavigationLink(value: Route.goal(id: g.id)) {
-                            GoalSummaryRow(goal: g, currency: currency)
-                                .padding(.vertical, 10)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .card()
-        .onAppear { GoalStore.remember(goals, currency: currency) }
-        .sheet(isPresented: $adding) {
-            GoalEditorSheet(goal: nil, currency: currency) { _ in model.dataChanged() }
-        }
     }
 }
 

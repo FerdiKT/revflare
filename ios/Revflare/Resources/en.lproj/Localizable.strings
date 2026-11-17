@@ -682,3 +682,19 @@
 "Their latest sessions with every event, newest first." = "Their latest sessions with every event, newest first.";
 "Key events only (paywalls, purchases, onboarding). Set up event queries on the server to see app opens and screens." = "Key events only (paywalls, purchases, onboarding). Set up event queries on the server to see app opens and screens.";
 "Their last purchase" = "Their last purchase";
+
+/* Overview: today by app, compact goals, insights */
+"No sales yet" = "No sales yet";
+"Insights" = "Insights";
+"· %@ · %@" = "· %@ · %@";
+"%@ of today's revenue came from %@" = "%@ of today's revenue came from %@";
+"At this pace the month ends at ≈ %@, %@ of the goal" = "At this pace the month ends at ≈ %@, %@ of the goal";
+"At this pace the month ends at ≈ %@, %@ vs last month" = "At this pace the month ends at ≈ %@, %@ vs last month";
+"Revenue over the last 7 days: %@, %@ vs the week before" = "Revenue over the last 7 days: %@, %@ vs the week before";
+"Trial → paid conversion this week: %@, last week %@" = "Trial → paid conversion this week: %@, last week %@";
+"%@: %lld refunds in 3 days, %@× the usual rate" = "%@: %lld refunds in 3 days, %@× the usual rate";
+"%@: %lld refunds in 3 days, none in the 4 weeks before" = "%@: %lld refunds in 3 days, none in the 4 weeks before";
+"%@ MRR %@ in 7 days (now %@)" = "%@ MRR %@ in 7 days (now %@)";
+"28-day churn rose to %@ from %@" = "28-day churn rose to %@ from %@";
+"28-day churn fell to %@ from %@" = "28-day churn fell to %@ from %@";
+"%lld new customers in the last 7 days, %@ vs the week before" = "%lld new customers in the last 7 days, %@ vs the week before";

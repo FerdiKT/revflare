@@ -37,7 +37,8 @@ in the chat.
 ## 2. Answer questions
 
 ```bash
-revflare overview                                  # today, yesterday, KPIs (28d) with change, MRR movement, at risk, forecast, goals, top apps, alerts
+revflare overview                                  # today (+ per app), yesterday, KPIs (28d) with change, MRR movement, at risk, forecast, goals, top apps, insights, alerts
+revflare insights                                  # 3–5 rule-based observations (top app today, month-end pace, weekly changes, refund spikes, MRR moves, churn)
 revflare apps [--platform ios|android|web]         # per app: store (App Store / Google Play / Polar), MRR, 28-day revenue, active subs, trials, notification status
 revflare app <id|bundle-id>                        # one app: setup, history sync, SDK key, products (Android: Google Play setup)
 revflare apps add-android <name> <package>         # add a Google Play app (manage), then set it up with google-play
@@ -335,6 +336,7 @@ refund_rate, churn_rate, churned_subscriptions, new_customers, arppu`.
 
 Question → command:
 - "How much did I make today / this month?" → `overview` (today) or `chart revenue --range mtd` (total line).
+- "Anything I should know?" / "What stands out?" → `insights`.
 - "Revenue last year by month" → `chart revenue --range 12m --interval month`.
 - "What's my MRR / how is it trending?" → `chart mrr --range 12m --interval month` and `mrr-movement`.
 - "Top countries / apps / products" → `breakdown --by country|app|product --range 28d`.

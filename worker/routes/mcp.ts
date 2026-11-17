@@ -63,9 +63,15 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
   const tools: Record<string, { description: string; inputSchema: object; run: (c: any, a: any) => Promise<unknown> }> = {
     get_overview: {
       description:
-        "Dashboard summary in the workspace currency: today's revenue and sales, MRR, 28-day revenue and proceeds with change vs the previous 28 days, active subscriptions and trials, MRR movement, revenue at risk, 30-day renewal forecast, goals (non-archived, with progress; list_goals for details), record days and top apps.",
+        "Dashboard summary in the workspace currency: today's revenue and sales (also per app: todayApps), MRR, 28-day revenue and proceeds with change vs the previous 28 days, active subscriptions and trials, MRR movement, revenue at risk, 30-day renewal forecast, goals (non-archived, with progress; list_goals for details), record days and top apps.",
       inputSchema: { type: "object", properties: { apps: rangeProps.apps } },
       run: (c, a) => call(c, "GET", `/overview${query(a, ["apps"])}`),
+    },
+    get_insights: {
+      description:
+        "Rule-based insights on the data, most important first (at most 5): today's top app share, month-end pace (against a monthly revenue goal or last month), 7-day revenue / new customers / trial conversion vs the week before, an app's refund spike, an app's 7-day MRR change, 28-day churn change. Each has an English text, kind, values (workspace currency, rates as fractions), tone, score and a link (app, chart metric, goal). Small samples are left out.",
+      inputSchema: { type: "object", properties: { apps: rangeProps.apps } },
+      run: (c, a) => call(c, "GET", `/insights${query(a, ["apps"])}`),
     },
     list_apps: {
       description:

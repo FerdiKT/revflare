@@ -21,6 +21,7 @@ import type {
   MetricFormat,
   MrrMovement,
   Overview,
+  TodayApp,
   Page,
   Point,
   Series,
@@ -31,6 +32,7 @@ import { customerAttribution, toAdsAttribution, TX_ATTRIBUTION_COLUMNS, TX_ATTRI
 import { defineDbFunction, type Db } from "./db";
 import { computeGoals, PAST_VERSION_KEY } from "./goals";
 import { rebuildQueued } from "./rollup";
+import { buildInsights, type AppDay } from "./overview-insights";
 import { keyEventActivity } from "./customer-activity";
 import { FxCache, addDays, dayOf, dayStart, keptShareSql, periodMonths, refundedShareSql } from "./money";
 import { base64url, fromBase64url, now } from "./util";
@@ -1368,7 +1370,9 @@ export const cohorts = cachedFn("cohorts", async (db, args: Scope & { months?: n
 
 // Overview -----------------------------------------------------------------------------------------------------------
 
-/** Today's and yesterday's flow numbers over the local days of `offMs` (ms east of UTC), from the transactions. */
+type LocalAppDay = { revenue: number; proceeds: number; sales: number; trials: number; refunds: number; yRevenue: number; yProceeds: number; ysRevenue?: number; ysProceeds?: number };
+
+/** Today's and yesterday's flow numbers (whole scope and per app) over the local days of `offMs` (ms east of UTC), from the transactions. */
 async function localDays(db: Db, scope: Scope, offMs: number, rate: number) {
   const t = now();
   const today = new Date(t + offMs).toISOString().slice(0, 10);
@@ -1376,24 +1380,41 @@ async function localDays(db: Db, scope: Scope, offMs: number, rate: number) {
   const f = appClause(scope, "t.app_id");
   const where = `t.workspace_id = ? AND t.environment = 'Production'${f.sql}`;
   // td: the sale is today's (1) or yesterday's (0); trials never count as sales or revenue.
-  const row = await db
+  const rows = await db
     .prepare(
       `SELECT
          SUM(CASE WHEN td = 1 AND paid THEN gross ELSE 0 END) AS revenue, SUM(CASE WHEN td = 1 AND paid THEN net ELSE 0 END) AS proceeds,
          SUM(td = 1 AND kind != 'trial') AS sales, SUM(td = 1 AND kind IN ('new', 'conversion')) AS new_subscriptions, SUM(td = 1 AND kind = 'trial') AS trials,
          SUM(CASE WHEN td = 0 AND paid THEN gross ELSE 0 END) AS y_revenue, SUM(CASE WHEN td = 0 AND paid THEN net ELSE 0 END) AS y_proceeds,
-         SUM(td = 0 AND kind != 'trial') AS y_sales
-       FROM (SELECT t.purchased_at >= ? AS td, t.kind, t.kind != 'trial' AS paid, t.gross_usd * ${KEPT} AS gross, t.proceeds_usd * ${KEPT} AS net
-             FROM transactions t WHERE ${where} AND t.purchased_at >= ? AND t.purchased_at <= ?)`,
+         SUM(td = 0 AND kind != 'trial') AS y_sales,
+         SUM(CASE WHEN td = 0 AND paid AND at <= ? THEN gross ELSE 0 END) AS ys_revenue, SUM(CASE WHEN td = 0 AND paid AND at <= ? THEN net ELSE 0 END) AS ys_proceeds, app_id
+       FROM (SELECT t.purchased_at >= ? AS td, t.purchased_at AS at, t.kind, t.kind != 'trial' AS paid, t.gross_usd * ${KEPT} AS gross, t.proceeds_usd * ${KEPT} AS net, t.app_id
+             FROM transactions t WHERE ${where} AND t.purchased_at >= ? AND t.purchased_at <= ?)
+       GROUP BY app_id`,
     )
-    .bind(start, scope.workspaceId, ...f.params, start - DAY, t)
-    .first<Record<string, number | null>>();
+    .bind(t - DAY, t - DAY, start, scope.workspaceId, ...f.params, start - DAY, t)
+    .all<Record<string, number | null> & { app_id: string }>();
   const refunds = await db
-    .prepare(`SELECT COUNT(*) AS n FROM transactions t WHERE ${where} AND t.refunded_at >= ? AND t.refunded_at <= ?`)
+    .prepare(`SELECT t.app_id, COUNT(*) AS n FROM transactions t WHERE ${where} AND t.refunded_at >= ? AND t.refunded_at <= ? GROUP BY t.app_id`)
     .bind(scope.workspaceId, ...f.params, start, t)
-    .first<{ n: number }>();
-  const v = (k: string) => row?.[k] ?? 0;
+    .all<{ app_id: string; n: number }>();
+  const v = (k: string) => rows.results.reduce((s, r) => s + (r[k] ?? 0), 0);
+  const perApp = new Map<string, LocalAppDay>();
+  const app = (id: string) => perApp.get(id) ?? perApp.set(id, { revenue: 0, proceeds: 0, sales: 0, trials: 0, refunds: 0, yRevenue: 0, yProceeds: 0 }).get(id)!;
+  for (const r of rows.results) {
+    const a = app(r.app_id);
+    a.revenue = (r.revenue ?? 0) * rate;
+    a.proceeds = (r.proceeds ?? 0) * rate;
+    a.sales = r.sales ?? 0;
+    a.trials = r.trials ?? 0;
+    a.yRevenue = (r.y_revenue ?? 0) * rate;
+    a.yProceeds = (r.y_proceeds ?? 0) * rate;
+    a.ysRevenue = (r.ys_revenue ?? 0) * rate;
+    a.ysProceeds = (r.ys_proceeds ?? 0) * rate;
+  }
+  for (const r of refunds.results) app(r.app_id).refunds = r.n;
   return {
+    perApp,
     today: {
       date: today,
       revenue: v("revenue") * rate,
@@ -1401,7 +1422,7 @@ async function localDays(db: Db, scope: Scope, offMs: number, rate: number) {
       sales: v("sales"),
       newSubscriptions: v("new_subscriptions"),
       trialsStarted: v("trials"),
-      refunds: refunds?.n ?? 0,
+      refunds: refunds.results.reduce((s, r) => s + r.n, 0),
     },
     yesterday: { revenue: v("y_revenue") * rate, proceeds: v("y_proceeds") * rate, sales: v("y_sales") },
   };
@@ -1470,17 +1491,73 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
         .bind(args.workspaceId)
         .first<{ month: string; v: number }>();
 
-  // Top apps by 28-day revenue.
-  const { results: apps } = await db
+  // Per-app rows of the last 56 days, read once: top apps by 28-day revenue, today per app, insights.
+  const { results: appDays } = await db
     .prepare(
-      `SELECT a.id, a.name, a.icon_url, a.platform,
-         SUM(CASE WHEN d.day > ? THEN d.gross_usd ELSE 0 END) AS rev, SUM(CASE WHEN d.day <= ? THEN d.gross_usd ELSE 0 END) AS prev,
-         SUM(CASE WHEN d.day = ? THEN d.mrr_usd ELSE 0 END) AS mrr
-       FROM daily_metrics d JOIN apps a ON a.id = d.app_id WHERE d.workspace_id = ? AND d.day > ?${appClause(args, "d.app_id").sql}
-       GROUP BY a.id ORDER BY rev DESC LIMIT 6`,
+      `SELECT app_id, day, gross_usd, proceeds_usd, refunds, new_subscriptions, renewals, one_time_purchases, trials_started, mrr_usd
+       FROM daily_metrics WHERE workspace_id = ? AND day > ?${f.sql}`,
     )
-    .bind(addDays(today, -28), addDays(today, -28), today, args.workspaceId, addDays(today, -56), ...f.params)
-    .all<{ id: string; name: string; icon_url: string | null; platform: string; rev: number; prev: number; mrr: number }>();
+    .bind(args.workspaceId, addDays(today, -56), ...f.params)
+    .all<AppDay & { proceeds_usd: number; new_subscriptions: number; renewals: number; one_time_purchases: number; trials_started: number }>();
+  const { results: appMeta } = await db
+    .prepare(`SELECT id, name, icon_url, platform FROM apps WHERE workspace_id = ?${appClause(args, "id").sql}`)
+    .bind(args.workspaceId, ...f.params)
+    .all<{ id: string; name: string; icon_url: string | null; platform: string }>();
+  const meta = new Map(appMeta.map((a) => [a.id, a]));
+  const totals = new Map<string, { rev: number; prev: number; mrr: number }>();
+  const cut = addDays(today, -28);
+  for (const d of appDays) {
+    if (!meta.has(d.app_id)) continue;
+    const tt = totals.get(d.app_id) ?? totals.set(d.app_id, { rev: 0, prev: 0, mrr: 0 }).get(d.app_id)!;
+    if (d.day > cut) tt.rev += d.gross_usd;
+    else tt.prev += d.gross_usd;
+    if (d.day === today) tt.mrr = d.mrr_usd;
+  }
+  const apps = [...totals]
+    .map(([id, tt]) => ({ ...meta.get(id)!, ...tt }))
+    .sort((a, b) => b.rev - a.rev)
+    .slice(0, 6);
+
+  // Today per app: the caller's local day (from the transactions), else the UTC day's rows.
+  const yesterday = addDays(today, -1);
+  const perDay = new Map<string, LocalAppDay>();
+  if (local) for (const [id, a] of local.perApp) perDay.set(id, a);
+  else
+    for (const d of appDays) {
+      if (d.day !== today && d.day !== yesterday) continue;
+      const a = perDay.get(d.app_id) ?? perDay.set(d.app_id, { revenue: 0, proceeds: 0, sales: 0, trials: 0, refunds: 0, yRevenue: 0, yProceeds: 0 }).get(d.app_id)!;
+      if (d.day === today) {
+        a.revenue = d.gross_usd * rate;
+        a.proceeds = d.proceeds_usd * rate;
+        a.sales = d.new_subscriptions + d.renewals + d.one_time_purchases;
+        a.trials = d.trials_started;
+        a.refunds = d.refunds;
+      } else {
+        a.yRevenue = d.gross_usd * rate;
+        a.yProceeds = d.proceeds_usd * rate;
+      }
+    }
+  const todayApps: TodayApp[] = [...perDay]
+    .filter(([id, a]) => meta.has(id) && (a.revenue || a.proceeds || a.sales || a.trials || a.refunds || a.yRevenue))
+    .map(([id, a]) => {
+      const m = meta.get(id)!;
+      return {
+        appId: id,
+        name: m.name,
+        iconUrl: m.icon_url,
+        platform: m.platform,
+        revenue: a.revenue,
+        proceeds: a.proceeds,
+        sales: a.sales,
+        trialsStarted: a.trials,
+        refunds: a.refunds,
+        yesterdayRevenue: a.yRevenue,
+        yesterdayProceeds: a.yProceeds,
+        ...(a.ysRevenue != null ? { yesterdaySameTimeRevenue: a.ysRevenue, yesterdaySameTimeProceeds: a.ysProceeds ?? 0 } : {}),
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue || b.proceeds - a.proceeds || b.sales + b.trialsStarted - (a.sales + a.trialsStarted) || b.yesterdayRevenue - a.yesterdayRevenue)
+    .slice(0, 30);
 
   const risk = await atRiskLocal(db, { ...args, currency, limit: 0 });
   // Renewal forecast changes slowly: computed once a day per scope.
@@ -1491,6 +1568,18 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
     dayCache.set(fcKey, fc);
     if (dayCache.size > 100) dayCache.delete(dayCache.keys().next().value!);
   }
+  const goals = await computeGoals(db, args.workspaceId, rate);
+  const insights = buildInsights({
+    currency,
+    rate,
+    today,
+    rows,
+    appDays,
+    appNames: new Map(appMeta.map((a) => [a.id, a.name])),
+    todayApps,
+    goals,
+    filtered: !!args.appIds?.length,
+  });
   const { results: alerts } = await db
     .prepare(
       `SELECT id, app_id, key, kind, severity, title, body, created_at, resolved_at FROM alerts WHERE workspace_id = ? AND resolved_at IS NULL AND created_at > ?
@@ -1502,7 +1591,7 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
   return {
     currency,
     asOf: now(),
-    ...(local ?? {
+    ...(local ? { today: local.today, yesterday: local.yesterday } : {
       today: {
         date: today,
         revenue: todayRow.gross_usd * rate,
@@ -1519,7 +1608,7 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
     atRisk: { mrr: risk.mrr, subscriptions: risk.groups.reduce((s, g) => s + g.subscriptions, 0) },
     forecast30: fc.expected,
     // Goals cover their own apps and periods, whatever the overview's app filter.
-    goals: await computeGoals(db, args.workspaceId, rate),
+    goals,
     records: {
       bestDay: best ? { date: best.day, revenue: best.v * rate } : null,
       todayIsRecord: !!best && (local ? local.today.revenue / rate : todayRow.gross_usd) > Math.max(best.v, 0),
@@ -1527,6 +1616,8 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
     },
     topApps: apps.map((a) => ({ appId: a.id, name: a.name, iconUrl: a.icon_url, revenue28d: a.rev * rate, mrr: a.mrr * rate, change: a.prev ? (a.rev - a.prev) / a.prev : null, platform: a.platform })),
     alerts: alerts.map((a) => ({ id: a.id, appId: a.app_id, kind: a.kind, funnelId: alertFunnelId(a.kind, a.key), experimentId: alertExperimentId(a.kind, a.key), severity: a.severity, title: a.title, body: a.body, createdAt: a.created_at, resolvedAt: a.resolved_at })),
+    todayApps,
+    insights,
   };
 });
 

@@ -2,11 +2,29 @@ import { str } from "../args.js";
 import type { Command } from "../context.js";
 import { UsageError } from "../errors.js";
 import { bar, c, fmtChange, fmtDate, fmtMoney, fmtPct, fmtValue, println, printJson, sparkline, table, truncate } from "../format.js";
-import type { AtRisk, Breakdown, Chart, Cohorts, Forecast, MrrMovement, Overview, RevenueDaily } from "../types.js";
+import type { AtRisk, Breakdown, Chart, Cohorts, Forecast, Insight, Insights, MrrMovement, Overview, RevenueDaily } from "../types.js";
 import { APP_OPTION, CURRENCY_OPTION, INTERVAL_OPTION, RANGE_OPTIONS, intervalQuery, parseMetric, positiveInt, rangeQuery, scopeQuery } from "./common.js";
 
 /** Metrics where a rise is bad news. */
 const INVERTED = new Set(["churn_rate", "churned_subscriptions", "refunds", "refunds_amount", "refund_rate"]);
+
+function printInsights(items: Insight[]) {
+  for (const i of items) println(`  ${i.tone === "positive" ? c.green("▲") : i.tone === "negative" ? c.red("▼") : c.cyan("●")} ${i.text}`);
+}
+
+export const insights: Command = {
+  name: "insights",
+  summary: "Rule-based insights on the data (today's top app, month-end pace, weekly changes, refund spikes, MRR moves, churn).",
+  options: { ...APP_OPTION, ...CURRENCY_OPTION },
+  max: 0,
+  examples: ["revflare insights", "revflare insights --app com.example.app --json"],
+  async run(ctx, { values }) {
+    const r = await ctx.api.get<Insights>("/insights", await scopeQuery(ctx, values));
+    if (ctx.json) return printJson(r);
+    if (!r.items.length) return println(c.gray("Nothing stands out right now."));
+    printInsights(r.items);
+  },
+};
 
 export const overview: Command = {
   name: "overview",
@@ -20,6 +38,20 @@ export const overview: Command = {
     const m = (n: number | null | undefined) => fmtMoney(n, o.currency);
     println(`${c.bold("Today")} ${c.gray(o.today.date)}  ${c.bold(m(o.today.revenue))} revenue, ${m(o.today.proceeds)} proceeds  ${c.gray(`${o.today.sales} sales · ${o.today.newSubscriptions} new subs · ${o.today.trialsStarted} trials · ${o.today.refunds} refunds`)}`);
     println(`${c.bold("Yesterday")}  ${m(o.yesterday.revenue)} revenue, ${m(o.yesterday.proceeds)} proceeds  ${c.gray(`${o.yesterday.sales} sales`)}`);
+    const todayApps = (o.todayApps ?? []).filter((a) => a.revenue || a.sales || a.trialsStarted || a.refunds);
+    if (todayApps.length > 1) {
+      println("");
+      println(
+        table(
+          [{ header: "TODAY BY APP", flex: true }, { header: "REVENUE", align: "right" }, { header: "PROCEEDS", align: "right" }, { header: "SALES", align: "right" }, { header: "TRIALS", align: "right" }, { header: "REFUNDS", align: "right" }, { header: "VS YDAY", align: "right" }],
+          todayApps.slice(0, 10).map((a) => [a.name, m(a.revenue), m(a.proceeds), String(a.sales), String(a.trialsStarted), String(a.refunds), fmtChange(a.yesterdayRevenue ? (a.revenue - a.yesterdayRevenue) / a.yesterdayRevenue : null)]),
+        ),
+      );
+    }
+    if (o.insights?.length) {
+      println("", c.bold("Insights"));
+      printInsights(o.insights);
+    }
     println("");
     println(
       table(
