@@ -27,6 +27,8 @@ enum Route: Hashable {
     case funnelLookup(appId: String, funnelId: String)
     /// Apple Ads attributed revenue of one app (campaign → ad group → keyword).
     case appleAds(appId: String)
+    /// App Store downloads (Sales and Trends reports) of the workspace, or of one app.
+    case downloads(appId: String?)
 }
 
 @MainActor

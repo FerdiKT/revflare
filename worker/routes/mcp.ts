@@ -220,6 +220,20 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
           ? call(c, "GET", `/ltv/summary${query(a, ["range", "from", "to", "apps", "appleAppIds", "by", "currency"])}`)
           : call(c, "GET", `/ltv${query(a, ["range", "from", "to", "apps", "appleAppIds", "by", "cohort", "currency"])}`),
     },
+    get_downloads: {
+      description:
+        "App Store downloads from Apple's Sales and Trends reports (report days are Pacific time, about a day behind; a preset range ends at the newest report day): first-time downloads (free + paid), redownloads and updates per day, " +
+        "per app (ranking with the previous period and 7 / 28 / 90-day windows vs the windows before), per country (all) and per device (iPhone, iPad, Mac...), plus conversions from Revflare's own data: " +
+        "trials started, new payers, revenue, download → trial, download → paid, revenue per download (RPD) and RevflareKit's Apple Ads installs (appleAdsShare: of the downloads of apps with RevflareKit installs; the rest is organic). " +
+        "Apps not added to Revflare count in the workspace totals (appId null). firstDay null = no reports imported yet (sync_downloads).",
+      inputSchema: { type: "object", properties: { ...rangeProps, currency: { type: "string" } } },
+      run: (c, a) => call(c, "GET", `/downloads${query(a, ["range", "from", "to", "apps", "currency"])}`),
+    },
+    sync_downloads: {
+      description: "Import the Sales and Trends days Revflare does not have yet (default the last 90 days, up to 365) in the background (a job). Needs an App Store Connect key with the Sales role and the vendor number.",
+      inputSchema: { type: "object", properties: { days: { type: "number" } } },
+      run: (c, a) => call(c, "POST", "/downloads/sync", { days: a.days }),
+    },
     get_acquisition: {
       description:
         "App Store acquisition from Apple's App Analytics reports: impressions, product page views, first-time downloads, redownloads, conversion rate (downloads / unique page views) and App Store purchases / proceeds, " +
@@ -555,7 +569,7 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
               "Read in-app purchase and subscription revenue (App Store) for one Revflare workspace. Money is in the workspace's reporting currency; " +
               "'revenue' is what customers paid (net of refunds), 'proceeds' is what the developer gets after Apple's commission and VAT. " +
               "Start with get_overview, list_apps for app ids, get_chart for time series, get_breakdown for top apps/countries/products, " +
-              "get_acquisition for where App Store visitors and downloads come from (source type, referrer, campaign), " +
+              "get_acquisition for where App Store visitors and downloads come from (source type, referrer, campaign), get_downloads for App Store downloads per day / app / country / device and download → trial / paid / revenue per download, " +
               "get_event_summary / list_funnels / get_funnel_report for in-app events and where users drop off, list_experiments / get_experiment_results for A/B tests.",
           });
         case "ping":

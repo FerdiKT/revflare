@@ -1,5 +1,6 @@
 // Typed client for the REST API v1 (docs/api.md). Errors are `{ error }` with a 4xx/5xx status → ApiError.
 import type {
+  Downloads,
   AdsAttribution,
   AdsName,
   AdsNames,
@@ -431,6 +432,10 @@ export const api = {
   ltv: (s: Scope & { by: LtvDimension; cohort: LtvCohortUnit; summary?: 1 }) => get<Ltv>(`/ltv${qs(s)}`),
   ltvSummary: (s: Scope & { by: LtvDimension }) => get<LtvSummary>(`/ltv/summary${qs(s)}`),
   reconciliation: (s: Scope) => get<ReconciliationResponse>(`/reconciliation${qs(s)}`),
+  downloads: {
+    get: (s: Scope & { currency?: string }) => get<Downloads>(`/downloads${qs(s)}`),
+    sync: (days = 90) => post<{ id: string; reused: boolean }>("/downloads/sync", { days }),
+  },
   acquisition: {
     get: (s: Scope & { by?: AcquisitionDimension[]; currency?: string; limit?: number }) => get<Acquisition>(`/acquisition${qs(s)}`),
     campaigns: (s: Pick<Scope, "apps"> = {}) => get<{ currency: string; items: AcquisitionCampaign[] }>(`/acquisition/campaigns${qs({ apps: s.apps })}`),

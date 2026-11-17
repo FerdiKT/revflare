@@ -1,6 +1,7 @@
 // Reconciliation with Apple's Sales and Trends daily summary reports: Apple's own unit counts and developer proceeds
 // per product, country and day. They replace the estimated proceeds of matching transactions and show where Revflare
-// is missing sales (reconciliation report).
+// is missing sales (reconciliation report). The app rows of the same reports (first downloads, redownloads, updates)
+// go to downloads_daily (read by worker/lib/downloads.ts).
 
 import { reportCredentials } from "../lib/credentials";
 import { defineDbFunction, type Db } from "../lib/db";
@@ -67,6 +68,60 @@ export async function aggregateReport(fx: FxCache, day: string, rows: Record<str
   return [...out.values()];
 }
 
+export type DownloadKind = "first" | "redownload" | "update";
+
+/** Product Type Identifier → download kind: 1* / F1 first download (free or paid), 3* / F3 redownload, 7* / F7 update. */
+export function downloadKind(productType: string): DownloadKind | null {
+  const p = productType.trim().toUpperCase();
+  if (/^(1[A-Z]*|F1)$/.test(p)) return "first";
+  if (/^(3[A-Z]*|F3)$/.test(p)) return "redownload";
+  if (/^(7[A-Z]*|F7)$/.test(p)) return "update";
+  return null; // in-app purchases, subscriptions, bundles
+}
+
+/** Apple's Device column; "Desktop" is a Mac. */
+export function deviceName(device: string | undefined): string {
+  const d = (device ?? "").trim();
+  if (!d) return "";
+  if (/^desktop$/i.test(d) || /^mac/i.test(d)) return "Mac";
+  return d;
+}
+
+export interface DownloadUnits {
+  appleId: string;
+  title: string;
+  country: string;
+  device: string;
+  kind: DownloadKind;
+  paid: boolean;
+  units: number;
+  proceedsUsd: number;
+}
+
+/** The app rows of a report summed per app, country, device, kind and free / paid. */
+export async function aggregateDownloads(fx: FxCache, day: string, rows: Record<string, string>[]): Promise<DownloadUnits[]> {
+  const out = new Map<string, DownloadUnits>();
+  for (const r of rows) {
+    const kind = downloadKind(r["Product Type Identifier"] ?? "");
+    const units = Number(r["Units"] ?? 0);
+    const appleId = (r["Apple Identifier"] ?? "").trim();
+    if (!kind || !units || !Number.isFinite(units) || !appleId) continue;
+    const country = (r["Country Code"] ?? "").trim().toUpperCase();
+    const device = deviceName(r["Device"]);
+    const paid = Math.abs(Number(r["Customer Price"] ?? 0)) > 0;
+    const key = `${appleId}|${country}|${device}|${kind}|${paid ? 1 : 0}`;
+    const cur = out.get(key) ?? out.set(key, { appleId, title: (r["Title"] ?? "").trim(), country, device, kind, paid, units: 0, proceedsUsd: 0 }).get(key)!;
+    cur.units += units;
+    if (paid) cur.proceedsUsd += await fx.toUsd(Math.abs(Number(r["Developer Proceeds"] ?? 0)) * units, r["Currency of Proceeds"], day);
+  }
+  return [...out.values()].filter((d) => d.units !== 0);
+}
+
+/** Marks of the days imported (settings sales_report:<ws>:<day>): "ok" days predate downloads and are fetched again. */
+const DONE = new Set(["ok2", "empty"]);
+/** The key that last read the reports (tried first). */
+const SALES_KEY = (workspaceId: string) => `sales_report_key:${workspaceId}`;
+
 /** Pacific-time day window (Sales and Trends days are Pacific time) as UTC ms, approximated as UTC-8/UTC-7. */
 function pacificWindow(day: string): [number, number] {
   const month = Number(day.slice(5, 7));
@@ -75,7 +130,7 @@ function pacificWindow(day: string): [number, number] {
   return [start, start + DAY];
 }
 
-async function storeAndApply(db: Db, workspaceId: string, day: string, rows: SalesRow[]) {
+async function storeAndApply(db: Db, workspaceId: string, day: string, rows: SalesRow[], downloads: DownloadUnits[] = []) {
   const { results: products } = await db
     .prepare("SELECT app_id, product_id FROM products WHERE workspace_id = ? AND product_id != ''")
     .bind(workspaceId)
@@ -108,12 +163,25 @@ async function storeAndApply(db: Db, workspaceId: string, day: string, rows: Sal
       );
     }
   }
+  stmts.push(db.prepare("DELETE FROM downloads_daily WHERE workspace_id = ? AND day = ?").bind(workspaceId, day));
+  // 11 columns: 9 rows a statement (100 parameters at most).
+  for (let i = 0; i < downloads.length; i += 9) {
+    const chunk = downloads.slice(i, i + 9);
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO downloads_daily (workspace_id, day, apple_id, app_id, title, country, device, kind, paid, units, proceeds_usd) VALUES ${chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+        )
+        .bind(...chunk.flatMap((d) => [workspaceId, day, d.appleId, appByAppleId.get(d.appleId) ?? null, d.title, d.country, d.device, d.kind, d.paid ? 1 : 0, d.units, d.proceedsUsd])),
+    );
+  }
   const touched = new Set(rows.map((r) => appBySku.get(r.sku) ?? appByAppleId.get(r.appleId)).filter(Boolean) as string[]);
   for (const appId of touched) {
     stmts.push(db.prepare("INSERT INTO rollup_queue (app_id, queued_at) VALUES (?, ?) ON CONFLICT(app_id) DO NOTHING").bind(appId, now()));
   }
   stmts.push(
-    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(`sales_report:${workspaceId}:${day}`, rows.length ? "ok" : "empty"),
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(`sales_report:${workspaceId}:${day}`, rows.length || downloads.length ? "ok2" : "empty"),
+    db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(`data_version:${workspaceId}`, String(now())),
   );
   await db.batch(stmts);
 }
@@ -127,6 +195,10 @@ export const syncSalesReports = defineDbFunction(
   async (db, args: { workspaceId: string; days?: number; maxRequests?: number }, env): Promise<{ fetched: string[]; missing: string[]; error?: string }> => {
     // The reports key (appstore_reports) first, then the main key; the vendor number is the account's, from either.
     const creds = await reportCredentials(env, db, args.workspaceId);
+    // The key that worked last time first (a reports key without the Sales role would fail every day first).
+    const last = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(SALES_KEY(args.workspaceId)).first<{ value: string }>();
+    const lastIndex = last ? creds.findIndex((c) => c.id === last.value) : -1;
+    if (lastIndex > 0) creds.unshift(...creds.splice(lastIndex, 1));
     const vendor = creds.map((c) => c.config.vendorNumber as string | undefined).find(Boolean);
     if (!creds.length || !vendor) return { fetched: [], missing: [], error: "Add an App Store Connect key with the Sales role and the vendor number" };
     let keyIndex = 0;
@@ -140,7 +212,8 @@ export const syncSalesReports = defineDbFunction(
       .prepare("SELECT key, value FROM settings WHERE key >= ? AND key <= ?")
       .bind(`sales_report:${args.workspaceId}:${addDays(yesterday, -days)}`, `sales_report:${args.workspaceId}:${yesterday}`)
       .all<{ key: string; value: string }>();
-    const have = new Set(done.map((d) => d.key.split(":").pop()));
+    const have = new Set(done.filter((d) => DONE.has(d.value)).map((d) => d.key.split(":").pop()));
+    let remembered = lastIndex >= 0;
     let requests = 0;
     for (let i = 0; i < days && requests < (args.maxRequests ?? 10); i++) {
       const day = addDays(yesterday, -i);
@@ -154,12 +227,17 @@ export const syncSalesReports = defineDbFunction(
           if (day < addDays(yesterday, -2)) await storeAndApply(db, args.workspaceId, day, []);
           continue;
         }
-        await storeAndApply(db, args.workspaceId, day, await aggregateReport(fx, day, rows));
+        await storeAndApply(db, args.workspaceId, day, await aggregateReport(fx, day, rows), await aggregateDownloads(fx, day, rows));
         fetched.push(day);
+        if (!remembered) {
+          await db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(SALES_KEY(args.workspaceId), creds[keyIndex].id).run();
+          remembered = true;
+        }
       } catch (err) {
         // A key without access to reports (401/403): try the next one for the same day.
         if (err instanceof AscError && (err.status === 401 || err.status === 403) && keyIndex + 1 < creds.length) {
           api = new AppStoreConnectApi(creds[++keyIndex]);
+          remembered = false;
           i--;
           continue;
         }

@@ -1496,3 +1496,233 @@ struct FunnelReport: Codable, Sendable {
         generatedAt = c.lenient(.generatedAt, nil)
     }
 }
+
+// MARK: - App Store downloads (Apple's Sales and Trends reports)
+
+/// Unit counts of Apple's Sales and Trends reports (report days are Pacific time, published about a day later).
+struct DownloadCounts: Codable, Hashable, Sendable {
+    /// First-time downloads (free and paid).
+    var downloads: Int
+    /// First-time downloads the customer paid for (paid apps).
+    var paidDownloads: Int
+    /// Downloads by a customer who had the app before.
+    var redownloads: Int
+    var updates: Int
+
+    var freeDownloads: Int { max(0, downloads - paidDownloads) }
+
+    private enum CodingKeys: String, CodingKey { case downloads, paidDownloads, redownloads, updates }
+
+    init(downloads: Int = 0, paidDownloads: Int = 0, redownloads: Int = 0, updates: Int = 0) {
+        self.downloads = downloads
+        self.paidDownloads = paidDownloads
+        self.redownloads = redownloads
+        self.updates = updates
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        downloads = c.lenient(.downloads, 0)
+        paidDownloads = c.lenient(.paidDownloads, 0)
+        redownloads = c.lenient(.redownloads, 0)
+        updates = c.lenient(.updates, 0)
+    }
+}
+
+/// What the downloads turned into, from Revflare's own sales (iOS apps; UTC days).
+struct DownloadConversions: Codable, Hashable, Sendable {
+    var trialsStarted: Int
+    /// Customers whose first payment fell in the range.
+    var newPayers: Int
+    var revenue: Double
+    var proceeds: Double
+    /// trialsStarted / downloads; nil without downloads.
+    var downloadToTrial: Double?
+    /// newPayers / downloads.
+    var downloadToPaid: Double?
+    /// revenue / downloads (RPD).
+    var revenuePerDownload: Double?
+    /// First-time installs RevflareKit attributed to Apple Ads.
+    var appleAdsDownloads: Int
+    /// appleAdsDownloads / downloads of the apps with RevflareKit installs; nil when none.
+    var appleAdsShare: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case trialsStarted, newPayers, revenue, proceeds, downloadToTrial, downloadToPaid, revenuePerDownload, appleAdsDownloads, appleAdsShare
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trialsStarted = c.lenient(.trialsStarted, 0)
+        newPayers = c.lenient(.newPayers, 0)
+        revenue = c.lenient(.revenue, 0)
+        proceeds = c.lenient(.proceeds, 0)
+        downloadToTrial = c.lenient(.downloadToTrial, nil)
+        downloadToPaid = c.lenient(.downloadToPaid, nil)
+        revenuePerDownload = c.lenient(.revenuePerDownload, nil)
+        appleAdsDownloads = c.lenient(.appleAdsDownloads, 0)
+        appleAdsShare = c.lenient(.appleAdsShare, nil)
+    }
+}
+
+/// `DownloadCounts & DownloadConversions` (the flat JSON object holds both).
+struct DownloadTotals: Codable, Hashable, Sendable {
+    var counts: DownloadCounts
+    var conversions: DownloadConversions
+
+    init(from decoder: Decoder) throws {
+        counts = try DownloadCounts(from: decoder)
+        conversions = try DownloadConversions(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try counts.encode(to: encoder)
+        try conversions.encode(to: encoder)
+    }
+}
+
+struct DownloadDay: Codable, Hashable, Sendable, Identifiable {
+    var day: String
+    var counts: DownloadCounts
+    var conversions: DownloadConversions
+
+    var id: String { day }
+
+    private enum CodingKeys: String, CodingKey { case day }
+
+    init(from decoder: Decoder) throws {
+        day = try decoder.container(keyedBy: CodingKeys.self).lenient(.day, "")
+        counts = try DownloadCounts(from: decoder)
+        conversions = try DownloadConversions(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(day, forKey: .day)
+        try counts.encode(to: encoder)
+        try conversions.encode(to: encoder)
+    }
+}
+
+struct DownloadWindow: Codable, Hashable, Sendable, Identifiable {
+    /// 7, 28 or 90 report days ending at lastDay.
+    var days: Int
+    var downloads: Int
+    /// The same number of days before.
+    var previous: Int
+    /// downloads / previous - 1; nil when previous is 0.
+    var change: Double?
+
+    var id: Int { days }
+}
+
+struct DownloadApp: Codable, Hashable, Sendable, Identifiable {
+    /// Revflare app id; nil for an app of the developer account that is not in Revflare.
+    var appId: String?
+    var appleId: String
+    var name: String
+    /// First-time downloads in the previous period of the same length.
+    var previousDownloads: Int
+    var windows: [DownloadWindow]
+    var counts: DownloadCounts
+    var conversions: DownloadConversions
+
+    var id: String { appId ?? "apple-\(appleId)" }
+
+    var change: Double? {
+        previousDownloads > 0 ? Double(counts.downloads) / Double(previousDownloads) - 1 : nil
+    }
+
+    private enum CodingKeys: String, CodingKey { case appId, appleId, name, previousDownloads, windows }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        appId = c.lenient(.appId, nil)
+        appleId = c.idString(.appleId) ?? ""
+        name = c.lenient(.name, "")
+        previousDownloads = c.lenient(.previousDownloads, 0)
+        windows = c.lenient(.windows, [])
+        counts = try DownloadCounts(from: decoder)
+        conversions = try DownloadConversions(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(appId, forKey: .appId)
+        try c.encode(appleId, forKey: .appleId)
+        try c.encode(name, forKey: .name)
+        try c.encode(previousDownloads, forKey: .previousDownloads)
+        try c.encode(windows, forKey: .windows)
+        try counts.encode(to: encoder)
+        try conversions.encode(to: encoder)
+    }
+}
+
+struct DownloadCountry: Codable, Hashable, Sendable, Identifiable {
+    var country: String
+    var counts: DownloadCounts
+
+    var id: String { country }
+
+    private enum CodingKeys: String, CodingKey { case country }
+
+    init(from decoder: Decoder) throws {
+        country = try decoder.container(keyedBy: CodingKeys.self).lenient(.country, "")
+        counts = try DownloadCounts(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(country, forKey: .country)
+        try counts.encode(to: encoder)
+    }
+}
+
+struct DownloadDevice: Codable, Hashable, Sendable, Identifiable {
+    /// iPhone, iPad, Mac, Apple TV, Apple Watch, Apple Vision, iPod touch...
+    var device: String
+    var counts: DownloadCounts
+
+    var id: String { device }
+
+    private enum CodingKeys: String, CodingKey { case device }
+
+    init(from decoder: Decoder) throws {
+        device = try decoder.container(keyedBy: CodingKeys.self).lenient(.device, "")
+        counts = try DownloadCounts(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(device, forKey: .device)
+        try counts.encode(to: encoder)
+    }
+}
+
+/// `GET /downloads`
+struct Downloads: Codable, Sendable {
+    var currency: String
+    /// The range read: a preset range ends at lastDay, the newest report day.
+    var from: String
+    var to: String
+    var totals: DownloadTotals
+    /// The previous period of the same length.
+    var previous: DownloadCounts
+    /// Totals over 7 / 28 / 90 report days ending at lastDay.
+    var windows: [DownloadWindow]
+    var days: [DownloadDay]
+    /// Most first-time downloads first (apps not in Revflare included when no app filter is set).
+    var apps: [DownloadApp]
+    /// Every country, most first-time downloads first.
+    var countries: [DownloadCountry]
+    var devices: [DownloadDevice]
+    /// First and newest report day with data (any range).
+    var firstDay: String?
+    var lastDay: String?
+}
+
+/// `POST /downloads/sync`
+struct DownloadSyncResponse: Codable, Sendable {
+    var id: String
+    var reused: Bool?
+}

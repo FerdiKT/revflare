@@ -212,6 +212,17 @@ extension APIClient {
         try await get("/revenue/attributed", query: ["apps": id, "range": range, "includeTest": includeTest ? "true" : nil])
     }
 
+    /// App Store downloads (Apple's Sales and Trends reports); `range`: "7d" | "28d" | "90d" | "12m" ...
+    func downloads(range: String, apps: Set<String> = []) async throws -> Downloads {
+        try await get("/downloads", query: ["range": range, "apps": appsParam(apps)])
+    }
+
+    private struct DownloadSync: Encodable { var days: Int }
+    /// Imports the missing Sales and Trends days (up to 365 back) in the background (`manage`).
+    func syncDownloads(days: Int = 90) async throws -> DownloadSyncResponse {
+        try await send("POST", "/downloads/sync", body: DownloadSync(days: days))
+    }
+
     func resolveAlert(_ id: String) async throws { _ = try await send("POST", "/alerts/\(id)/resolve", as: IgnoredResponse.self) }
 
     // Devices

@@ -1,4 +1,5 @@
 import { commandHelp, parseCommand, splitCommand } from "./args.js";
+import { downloadsCmd, downloadsSync } from "./commands/downloads.js";
 import { acquisition, acquisitionCampaigns, acquisitionImport, acquisitionRequests, acquisitionStatus } from "./commands/acquisition.js";
 import { adminOverview, adminUsers, adminWorkspaces } from "./commands/admin.js";
 import { app, apps } from "./commands/apps.js";
@@ -61,6 +62,8 @@ export const COMMANDS: Command[] = [
   experiments,
   events,
   funnels,
+  downloadsCmd,
+  downloadsSync,
   acquisition,
   acquisitionCampaigns,
   acquisitionStatus,
@@ -104,6 +107,7 @@ const GROUPS: Array<[string, string[]]> = [
   ["Meta Ads", ["meta"]],
   ["Paywalls & remote config", ["offerings", "entitlements", "config", "experiments"]],
   ["Events & funnels", ["events", "funnels"]],
+  ["App Store downloads", ["downloads", "downloads sync"]],
   ["App Store acquisition", ["acquisition", "acquisition campaigns", "acquisition status", "acquisition requests", "acquisition import"]],
   ["Alerts & goals", ["alerts", "alerts resolve", "goals", "goals show", "goals add", "goals edit", "goals archive", "goals reorder", "goals rm"]],
   ["Workspace", ["invite", "invitations", "invitations revoke", "usage"]],
@@ -139,6 +143,7 @@ export function mainHelp(): string {
     "  revflare attribution --range 90d --by keyword",
     "  revflare ltv --by campaign --cohort month --range 12m",
     "  revflare acquisition --by campaign --range 90d",
+    "  revflare downloads --range 90d --by country",
     "  revflare meta com.example.app log",
     "  revflare google-play android:com.example.app test",
     "  revflare offerings com.example.app export > offerings.json",

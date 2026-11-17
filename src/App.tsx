@@ -13,6 +13,7 @@ import { AppsProvider } from "./lib/apps";
 import { useQuota } from "./lib/quota";
 import { SessionProvider, useSession } from "./lib/session";
 import { AcquisitionPage } from "./pages/AcquisitionPage";
+import { DownloadsPage } from "./pages/DownloadsPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { AppDetailPage } from "./pages/AppDetailPage";
 import { AppleAdsPage } from "./pages/AppleAdsPage";
@@ -134,6 +135,7 @@ function WorkspaceScope() {
               <Route path="at-risk" element={<AtRiskPage />} />
               <Route path="cohorts" element={<CohortsPage />} />
               <Route path="forecast" element={<ForecastPage />} />
+              <Route path="downloads" element={<DownloadsPage />} />
               <Route path="acquisition" element={<AcquisitionPage />} />
               <Route path="apple-ads" element={<AppleAdsPage />} />
               <Route path="ltv" element={<LtvPage />} />

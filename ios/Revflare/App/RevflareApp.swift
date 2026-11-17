@@ -211,6 +211,7 @@ extension View {
             case let .funnelReport(appId, funnel): FunnelReportView(appId: appId, funnel: funnel)
             case let .funnelLookup(appId, funnelId): FunnelLookupView(appId: appId, funnelId: funnelId)
             case let .appleAds(appId): AppleAdsView(appId: appId)
+            case let .downloads(appId): DownloadsView(appId: appId)
             }
             }
             .quotaBanner()

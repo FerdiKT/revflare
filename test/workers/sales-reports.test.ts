@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppStoreConnectApi } from "../../worker/apple/connect";
-import { aggregateReport } from "../../worker/apple/sales";
+import { aggregateDownloads, aggregateReport, downloadKind } from "../../worker/apple/sales";
 import type { FxCache } from "../../worker/lib/money";
 
 // Sales and Trends reports: Apple answers 406 unless Accept is application/a-gzip, and sends gzip-compressed TSV.
@@ -84,5 +84,51 @@ describe("aggregateReport", () => {
       ["app_weekly", "DE", "IAY", 2, 0],
       ["app", "US", "1F", 0, 1],
     ]);
+  });
+});
+
+describe("aggregateDownloads", () => {
+  const usd = { toUsd: async (amount: number) => amount } as unknown as FxCache;
+  const app = (type: string, units: number, extra: Record<string, string> = {}) => ({
+    SKU: "app",
+    Title: "Example",
+    "Apple Identifier": "1234567890",
+    "Country Code": "us",
+    "Product Type Identifier": type,
+    Units: String(units),
+    "Customer Price": "0",
+    "Developer Proceeds": "0",
+    "Currency of Proceeds": "USD",
+    Device: "iPhone",
+    ...extra,
+  });
+
+  it("maps product types to first downloads, redownloads and updates; skips in-app purchases", () => {
+    expect(["1", "1F", "1T", "F1", "3", "3F", "F3", "7", "7F", "F7", "IAY", "IA1", "FI1", "1-B"].map(downloadKind)).toEqual([
+      "first", "first", "first", "first", "redownload", "redownload", "redownload", "update", "update", "update", null, null, null, null,
+    ]);
+  });
+
+  it("sums app rows per country, device, kind and free / paid", async () => {
+    const rows = await aggregateDownloads(usd, "2026-10-15", [
+      app("1F", 5),
+      app("1F", 2),
+      app("1F", 1, { Device: "iPad" }),
+      app("1F", 3, { "Customer Price": "2.99", "Developer Proceeds": "2.54" }),
+      app("3F", 4, { "Country Code": "DE" }),
+      app("7F", 9, { Device: "Desktop" }),
+      app("IAY", 6, { "Apple Identifier": "999" }),
+      app("1F", 0),
+    ]);
+    const view = rows.map((r) => [r.country, r.device, r.kind, r.paid, r.units]);
+    expect(view).toEqual([
+      ["US", "iPhone", "first", false, 7],
+      ["US", "iPad", "first", false, 1],
+      ["US", "iPhone", "first", true, 3],
+      ["DE", "iPhone", "redownload", false, 4],
+      ["US", "Mac", "update", false, 9],
+    ]);
+    expect(rows[2].proceedsUsd).toBeCloseTo(3 * 2.54);
+    expect(rows[0]).toMatchObject({ appleId: "1234567890", title: "Example" });
   });
 });

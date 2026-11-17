@@ -17,6 +17,11 @@ struct AppsView: View {
                 if search.isEmpty {
                     Section {
                         summary(list)
+                        if list.items.contains(where: { !$0.isAndroid }) {
+                            NavigationLink(value: Route.downloads(appId: nil)) {
+                                Label("App Store downloads", systemImage: "arrow.down.app")
+                            }
+                        }
                     }
                 }
                 Section {
@@ -281,6 +286,11 @@ struct AppDetailView: View {
             SectionHeader(title: "Acquisition", systemImage: "person.crop.circle.badge.plus")
             NavigationLink(value: Route.appleAds(appId: appId)) {
                 AnalyticsLinkRow(title: "Apple Ads", systemImage: "megaphone", subtitle: String(localized: "Revenue per campaign, ad group and keyword"))
+            }
+            .buttonStyle(.plain)
+            Divider()
+            NavigationLink(value: Route.downloads(appId: appId)) {
+                AnalyticsLinkRow(title: "Downloads", systemImage: "arrow.down.app", subtitle: String(localized: "First downloads, conversion and countries"))
             }
             .buttonStyle(.plain)
         }

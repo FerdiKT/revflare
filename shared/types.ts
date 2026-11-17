@@ -773,6 +773,95 @@ export interface ApiKey {
   lastUsedAt: number | null;
 }
 
+// App Store downloads (Apple's Sales and Trends reports) -------------------------------------------------------------
+
+/** Unit counts of Apple's Sales and Trends reports (report days are Pacific time, published about a day later). */
+export interface DownloadCounts {
+  /** First-time downloads (free and paid; Product Type 1* / F1). */
+  downloads: number;
+  /** First-time downloads the customer paid for (paid apps). */
+  paidDownloads: number;
+  /** Downloads by a customer who had the app before (3* / F3). */
+  redownloads: number;
+  /** App updates (7* / F7). */
+  updates: number;
+}
+
+/** What the downloads turned into, from Revflare's own sales (iOS apps; UTC days, so a day may shift). */
+export interface DownloadConversions {
+  trialsStarted: number;
+  /** Customers whose first payment fell in the range. */
+  newPayers: number;
+  /** Gross revenue (response currency). */
+  revenue: number;
+  proceeds: number;
+  /** trialsStarted / downloads; null without downloads. */
+  downloadToTrial: number | null;
+  /** newPayers / downloads. */
+  downloadToPaid: number | null;
+  /** revenue / downloads (RPD). */
+  revenuePerDownload: number | null;
+  /** First-time installs RevflareKit attributed to Apple Ads (production; apps with RevflareKit only). */
+  appleAdsDownloads: number;
+  /** appleAdsDownloads / downloads of the apps with RevflareKit installs; null when none. */
+  appleAdsShare: number | null;
+}
+
+export interface DownloadDay extends DownloadCounts, DownloadConversions {
+  day: string;
+}
+
+export interface DownloadWindow {
+  /** 7, 28 or 90 report days ending at lastDay. */
+  days: number;
+  downloads: number;
+  /** The same number of days before. */
+  previous: number;
+  /** downloads / previous - 1; null when previous is 0. */
+  change: number | null;
+}
+
+export interface DownloadApp extends DownloadCounts, DownloadConversions {
+  /** Revflare app id; null for an app of the developer account that is not in Revflare. */
+  appId: string | null;
+  appleId: string;
+  name: string;
+  /** First-time downloads in the previous period of the same length. */
+  previousDownloads: number;
+  windows: DownloadWindow[];
+}
+
+export interface DownloadCountry extends DownloadCounts {
+  country: string;
+}
+
+export interface DownloadDevice extends DownloadCounts {
+  /** iPhone, iPad, Mac, Apple TV, Apple Watch, Apple Vision, iPod touch... */
+  device: string;
+}
+
+/** GET /downloads */
+export interface Downloads {
+  currency: string;
+  /** The range read: a preset range (range=7d...) ends at lastDay, the newest report day. */
+  from: string;
+  to: string;
+  totals: DownloadCounts & DownloadConversions;
+  /** The previous period of the same length. */
+  previous: DownloadCounts;
+  /** Workspace (or scope) totals over 7 / 28 / 90 report days ending at lastDay. */
+  windows: DownloadWindow[];
+  days: DownloadDay[];
+  /** Most first-time downloads first (apps not in Revflare included when no app filter is set). */
+  apps: DownloadApp[];
+  /** Every country, most first-time downloads first. */
+  countries: DownloadCountry[];
+  devices: DownloadDevice[];
+  /** First and newest report day with data (any range). */
+  firstDay: string | null;
+  lastDay: string | null;
+}
+
 // App Store acquisition (Apple's App Analytics reports) ---------------------------------------------------------------
 
 /**
