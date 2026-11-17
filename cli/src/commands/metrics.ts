@@ -2,11 +2,17 @@ import { str } from "../args.js";
 import type { Command } from "../context.js";
 import { UsageError } from "../errors.js";
 import { bar, c, fmtChange, fmtDate, fmtMoney, fmtPct, fmtValue, println, printJson, sparkline, table, truncate } from "../format.js";
-import type { AtRisk, Breakdown, Chart, Cohorts, Forecast, Insight, Insights, MrrMovement, Overview, RevenueDaily } from "../types.js";
+import type { AtRisk, Breakdown, Chart, Cohorts, Forecast, Insight, Insights, MrrMovement, Overview, RevenueDaily, TodayApp } from "../types.js";
 import { APP_OPTION, CURRENCY_OPTION, INTERVAL_OPTION, RANGE_OPTIONS, intervalQuery, parseMetric, positiveInt, rangeQuery, scopeQuery } from "./common.js";
 
 /** Metrics where a rise is bad news. */
 const INVERTED = new Set(["churn_rate", "churned_subscriptions", "refunds", "refunds_amount", "refund_rate"]);
+
+/** Today against yesterday up to the same time when the server sends it, else the whole of yesterday. */
+function vsYesterday(a: TodayApp): number | null {
+  const before = a.yesterdaySameTimeRevenue ?? a.yesterdayRevenue;
+  return before ? (a.revenue - before) / before : null;
+}
 
 function printInsights(items: Insight[]) {
   for (const i of items) println(`  ${i.tone === "positive" ? c.green("▲") : i.tone === "negative" ? c.red("▼") : c.cyan("●")} ${i.text}`);
@@ -44,7 +50,7 @@ export const overview: Command = {
       println(
         table(
           [{ header: "TODAY BY APP", flex: true }, { header: "REVENUE", align: "right" }, { header: "PROCEEDS", align: "right" }, { header: "SALES", align: "right" }, { header: "TRIALS", align: "right" }, { header: "REFUNDS", align: "right" }, { header: "VS YDAY", align: "right" }],
-          todayApps.slice(0, 10).map((a) => [a.name, m(a.revenue), m(a.proceeds), String(a.sales), String(a.trialsStarted), String(a.refunds), fmtChange(a.yesterdayRevenue ? (a.revenue - a.yesterdayRevenue) / a.yesterdayRevenue : null)]),
+          todayApps.slice(0, 10).map((a) => [a.name, m(a.revenue), m(a.proceeds), String(a.sales), String(a.trialsStarted), String(a.refunds), fmtChange(vsYesterday(a))]),
         ),
       );
     }
