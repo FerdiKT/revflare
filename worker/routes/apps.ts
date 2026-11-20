@@ -103,9 +103,9 @@ async function getApp(c: { var: AppEnv["Variables"] }, id: string) {
 appRoutes.get("/apps", requirePermission("read"), async (c) => {
   const db = c.var.db;
   const { results } = await db.prepare(`SELECT *, ${INTEGRATION_FLAGS} FROM apps WHERE workspace_id = ? ORDER BY archived, name`).bind(wsId(c)).all<AppRow>();
-  const [{ stats, currency }, base] = await Promise.all([appStats(c.env, { workspaceId: wsId(c) }), baseUrl(c.env, db, c.req.url)]);
+  const [{ stats, currency, stocksAsOf }, base] = await Promise.all([appStats(c.env, { workspaceId: wsId(c) }), baseUrl(c.env, db, c.req.url)]);
   const items = results.map((r) => toApp(r, base, stats[r.id])).sort((a, b) => Number(a.archived) - Number(b.archived) || b.revenue28d - a.revenue28d || a.name.localeCompare(b.name));
-  return c.json({ items, currency });
+  return c.json({ items, currency, stocksAsOf });
 });
 
 appRoutes.get("/apps/:id", requirePermission("read"), async (c) => {

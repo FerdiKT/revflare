@@ -401,6 +401,8 @@ Question → command:
   LTV = cumulative revenue per customer.
 - Charts mark days that come from imported history (RevenueCat Charts) with `*` (`importedUntil` in JSON): those
   values are RevenueCat's, before Revflare's own transaction history of the app starts.
+- MRR, active subscriptions and trials are the last day rolled for every app (`stocksAsOf` / the KPI's `asOf`):
+  just after 00:00 UTC that is yesterday until the new day's rows are written, so a date next to MRR is not a drop.
 
 ## 4. Imports and setup
 

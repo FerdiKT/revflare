@@ -372,6 +372,8 @@ struct MetricChart: Codable, Sendable {
     var previousTotal: Double?
     var series: [Series]?
     var importedUntil: String?
+    /// Stock metrics: days after this UTC day (not yet rolled for every app, just after 00:00 UTC) repeat its value.
+    var stocksAsOf: String?
 }
 
 struct Kpi: Codable, Hashable, Sendable, Identifiable {
@@ -383,6 +385,8 @@ struct Kpi: Codable, Hashable, Sendable, Identifiable {
     var previous: Double?
     var change: Double?
     var spark: [Double]
+    /// Stocks (MRR, actives, trials): the UTC day the value is of (yesterday just after 00:00 UTC); nil from older servers.
+    var asOf: String?
 }
 
 /// A goal with its progress in the current (or, for an ended custom goal, the last) period (`GET /goals`,
@@ -642,6 +646,8 @@ struct Overview: Codable, Sendable {
 
     var currency: String
     var asOf: Double
+    /// UTC day of MRR, active subscriptions and trials (today, or the last complete day just after 00:00 UTC); nil from older servers.
+    var stocksAsOf: String?
     var today: Today
     var yesterday: Yesterday
     var kpis: [Kpi]

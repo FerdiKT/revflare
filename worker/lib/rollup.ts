@@ -345,7 +345,10 @@ async function customerCounts(db: Db, appId: string, fromDay: string): Promise<C
  * and writes only the rows that changed. Keeps workspace_daily in step and bumps the workspace's data version.
  */
 export async function rebuildApp(db: Db, appId: string, fromDay: string | null = null): Promise<{ days: number; transactions: number; written: number }> {
-  const app = await db.prepare("SELECT workspace_id, commission_pct FROM apps WHERE id = ?").bind(appId).first<{ workspace_id: string; commission_pct: number }>();
+  const app = await db
+    .prepare("SELECT workspace_id, commission_pct, rolled_day FROM apps WHERE id = ?")
+    .bind(appId)
+    .first<{ workspace_id: string; commission_pct: number; rolled_day: string | null }>();
   if (!app) {
     await db.prepare("DELETE FROM rollup_queue WHERE app_id = ?").bind(appId).run();
     return { days: 0, transactions: 0, written: 0 };
@@ -451,6 +454,8 @@ export async function rebuildApp(db: Db, appId: string, fromDay: string | null =
   if (written) stmts.push(db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(`data_version:${app.workspace_id}`, String(now())));
   // Days before today changed: the goals' cached bases (worker/lib/goals.ts PAST_VERSION_KEY) are rebuilt.
   if (days.length && days[0] < today) stmts.push(db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(`data_past:${app.workspace_id}`, String(now())));
+  // The app's rows are complete through today (reads carry stocks from the last complete day until then).
+  if (app.rolled_day !== today) stmts.push(db.prepare("UPDATE apps SET rolled_day = ? WHERE id = ?").bind(today, appId));
   stmts.push(db.prepare("DELETE FROM rollup_queue WHERE app_id = ?").bind(appId));
   for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
   return { days: computed.length, transactions: txs.length, written };

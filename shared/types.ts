@@ -310,6 +310,8 @@ export interface Chart {
   series?: Series[];
   /** Dates whose values come from an import (RevenueCat Charts) rather than transactions. */
   importedUntil?: string | null;
+  /** Stock metrics: days after this one (not yet rolled for every app, just after 00:00 UTC) repeat its value. */
+  stocksAsOf?: string;
 }
 
 export interface Kpi {
@@ -323,6 +325,8 @@ export interface Kpi {
   change: number | null;
   /** Last 28 days (or 12 months for MRR-like), oldest first. */
   spark: number[];
+  /** Stocks (MRR, actives, trials): the UTC day the value is of. Yesterday just after 00:00 UTC, until every app is rolled for the new day. */
+  asOf?: string;
 }
 
 /** Goal metrics: money (stored in USD, shown in the workspace currency) and counts. */
@@ -418,6 +422,8 @@ export interface GoalInput {
 export interface Overview {
   currency: string;
   asOf: number;
+  /** UTC day of MRR, active subscriptions and trials (the KPIs and top apps): today, or the last complete day just after 00:00 UTC. */
+  stocksAsOf?: string;
   today: { revenue: number; proceeds: number; sales: number; newSubscriptions: number; trialsStarted: number; refunds: number; date: string };
   yesterday: { revenue: number; proceeds: number; sales: number };
   kpis: Kpi[];

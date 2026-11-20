@@ -62,7 +62,7 @@ export const overview: Command = {
     println(
       table(
         [{ header: "KPI" }, { header: "VALUE", align: "right" }, { header: "CHANGE", align: "right" }, { header: "TREND" }],
-        o.kpis.map((k) => [k.label, fmtValue(k.value, k.format, o.currency), fmtChange(k.change, INVERTED.has(k.metric)), c.cyan(sparkline(k.spark))]),
+        o.kpis.map((k) => [k.label + (k.asOf && k.asOf !== o.today.date ? c.gray(` (${k.asOf})`) : ""), fmtValue(k.value, k.format, o.currency), fmtChange(k.change, INVERTED.has(k.metric)), c.cyan(sparkline(k.spark))]),
       ),
     );
     const mv = o.mrrMovement;
@@ -158,6 +158,7 @@ export const chart: Command = {
     println("");
     println(`${c.bold("Total")} ${fmtValue(ch.total, ch.format, ch.currency)}${prev !== null ? `  ${c.gray(`previous ${fmtValue(prev, ch.format, ch.currency)}`)} ${fmtChange(change, INVERTED.has(metric))}` : ""}`);
     if (ch.importedUntil) println(c.gray(`* includes imported history (RevenueCat) up to ${ch.importedUntil}`));
+    if (ch.stocksAsOf) println(c.gray(`days after ${ch.stocksAsOf} repeat its value (not every app is rolled for the new UTC day yet)`));
   },
 };
 

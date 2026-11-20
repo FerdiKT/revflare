@@ -187,6 +187,32 @@ const EXTERNAL_COLUMNS = ["revenue", "proceeds", "mrr", "active_subscriptions", 
 
 const emptyRow = (day: string): DayRow => Object.fromEntries([["day", day], ...SUM_COLUMNS.map((c) => [c, 0])]) as DayRow;
 
+/** Point-in-time columns: a day's value is its state, not a sum of what happened (carried from the last complete day). */
+export const STOCK_COLUMNS = ["mrr_usd", "mrr_proceeds_usd", "active_subscriptions", "active_trials"] as const satisfies readonly (keyof DayRow)[];
+/** An app not rolled for this many days is stuck (failing rebuild): it no longer holds the scope's stocks back. */
+const STUCK_DAYS = 3;
+
+/**
+ * The last UTC day whose rows are complete for every app of the scope (`apps.rolled_day`): after 00:00 UTC the new
+ * day's rows appear app by app (a sale, the nightly queue at 00:10), so until all are rolled MRR / actives / trials
+ * are read from the day before instead of a missing (0) or partial row. Today when everything is rolled.
+ */
+export async function stocksAsOf(db: Db, scope: Scope, today = dayOf(now())): Promise<string> {
+  const f = appClause(scope, "id");
+  const r = await db
+    .prepare(`SELECT MIN(rolled_day) AS d FROM apps WHERE workspace_id = ? AND archived = 0 AND rolled_day >= ?${f.sql}`)
+    .bind(scope.workspaceId, addDays(today, -STUCK_DAYS), ...f.params)
+    .first<{ d: string | null }>();
+  return r?.d && r.d < today ? r.d : today;
+}
+
+/** Rows (oldest first, consecutive days) after `asOf` take `asOf`'s stock values. */
+function carryStocks<T extends Pick<DayRow, "day" | (typeof STOCK_COLUMNS)[number]>>(rows: T[], asOf: string) {
+  const base = rows.find((r) => r.day === asOf);
+  if (!base) return;
+  for (const r of rows) if (r.day > asOf) for (const c of STOCK_COLUMNS) (r[c] as number) = base[c] as number;
+}
+
 /**
  * The apps' rows summed per day: read as they are and added up here (a GROUP BY's temporary b-tree reads each row
  * twice). Rows of another workspace never count, whatever ids are passed (`+workspace_id`: a filter only, so the
@@ -210,7 +236,17 @@ async function appDayRows(db: Db, workspaceId: string, appIds: string[], from: s
  * Daily totals of the scope for [from, to] (every day present, imported history merged in). `byApp`: read a selection
  * of apps through the (app_id, day) key, so only their rows are read (the ids must be apps of the workspace).
  */
-export async function dailyRows(db: Db, scope: Scope, from: string, to: string, opts: { byApp?: boolean } = {}): Promise<{ rows: DayRow[]; importedUntil: string | null }> {
+export async function dailyRows(
+  db: Db,
+  scope: Scope,
+  rangeFrom: string,
+  to: string,
+  opts: { byApp?: boolean } = {},
+): Promise<{ rows: DayRow[]; importedUntil: string | null; stocksAsOf: string | null }> {
+  // Stocks of days not yet rolled for every app come from the last complete day (read from there if it is earlier).
+  const asOf = await stocksAsOf(db, scope);
+  const carry = asOf < to;
+  const from = carry && asOf < rangeFrom ? asOf : rangeFrom;
   const f = appClause(scope);
   // The whole workspace reads its precomputed totals (one row a day); a selection of apps sums their rows.
   const { results } = f.sql
@@ -290,9 +326,15 @@ export async function dailyRows(db: Db, scope: Scope, from: string, to: string, 
       if (!importedUntil || e.day > importedUntil) importedUntil = e.day;
     }
   }
-  const rows: DayRow[] = [];
+  let rows: DayRow[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) rows.push(byDay.get(d) ?? emptyRow(d));
-  return { rows, importedUntil };
+  if (carry) {
+    // Copies: the rows may be the query's (shared with nothing else, but keep the carried values off them).
+    rows = rows.map((r) => (r.day > asOf ? { ...r } : r));
+    carryStocks(rows, asOf);
+    if (from < rangeFrom) rows = rows.slice(rows.findIndex((r) => r.day === rangeFrom));
+  }
+  return { rows, importedUntil, stocksAsOf: carry ? asOf : null };
 }
 
 function bucketOf(day: string, interval: Interval): string {
@@ -389,7 +431,7 @@ export async function chartLocal(db: Db, args: ChartArgs): Promise<Chart> {
   const span = Math.round((dayStart(args.to) - dayStart(args.from)) / DAY) + 1;
   const prevFrom = addDays(args.from, -span);
   // One extra day before `from` gives the churn base of the first bucket.
-  const { rows: all, importedUntil } = await dailyRows(db, args, addDays(prevFrom, -1), args.to);
+  const { rows: all, importedUntil, stocksAsOf: asOf } = await dailyRows(db, args, addDays(prevFrom, -1), args.to);
   const prevRows = all.slice(1, span + 1);
   const rows = all.slice(span + 1);
   const buckets = bucketize(rows, interval);
@@ -411,13 +453,17 @@ export async function chartLocal(db: Db, args: ChartArgs): Promise<Chart> {
     previousTotal: convert(args.metric, metricValue(args.metric, prevRows, all[0] ?? null), rate),
     importedUntil: importedUntil && importedUntil >= args.from ? importedUntil : null,
   };
-  if (args.groupBy) chart.series = await groupedSeries(db, args, interval, rate);
+  // MRR / actives / trials of the last days are the last complete day's (the new day is not rolled for every app yet).
+  if (asOf && info.kind === "stock") chart.stocksAsOf = asOf;
+  if (args.groupBy) chart.series = await groupedSeries(db, args, interval, rate, asOf);
   return chart;
 }
 
-async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: number): Promise<Series[]> {
+async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: number, asOf: string | null): Promise<Series[]> {
   const metric = args.metric;
   const groups = new Map<string, { label: string; byDay: Map<string, DayRow> }>();
+  // Per app, stocks after the last complete day carry its values (read from that day when it is before the range).
+  const carry = args.groupBy === "app" && asOf && METRIC_INFO[metric].kind === "stock" ? asOf : null;
   if (args.groupBy === "app") {
     const f = appClause(args, "d.app_id");
     const { results } = await db
@@ -425,7 +471,7 @@ async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: 
         `SELECT d.*, a.name AS label FROM daily_metrics d JOIN apps a ON a.id = d.app_id
          WHERE d.workspace_id = ? AND d.day >= ? AND d.day <= ?${f.sql}`,
       )
-      .bind(args.workspaceId, args.from, args.to, ...f.params)
+      .bind(args.workspaceId, carry && carry < args.from ? carry : args.from, args.to, ...f.params)
       .all<DayRow & { app_id: string; label: string }>();
     for (const r of results) {
       if (!groups.has(r.app_id)) groups.set(r.app_id, { label: r.label, byDay: new Map() });
@@ -460,8 +506,11 @@ async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: 
   }
   const series: Series[] = [];
   for (const [key, g] of groups) {
-    const rows: DayRow[] = [];
-    for (let d = args.from; d <= args.to; d = addDays(d, 1)) rows.push(g.byDay.get(d) ?? emptyRow(d));
+    let rows: DayRow[] = [];
+    const start = carry && carry < args.from ? carry : args.from;
+    for (let d = start; d <= args.to; d = addDays(d, 1)) rows.push(g.byDay.has(d) ? { ...g.byDay.get(d)! } : emptyRow(d));
+    if (carry) carryStocks(rows, carry);
+    if (start < args.from) rows = rows.slice(rows.findIndex((r) => r.day === args.from));
     const points = bucketize(rows, interval).map((b) => ({ date: b.date, value: convert(metric, metricValue(metric, b.rows, null), rate) }));
     series.push({ key, label: g.label, points, total: convert(metric, metricValue(metric, rows, null), rate) });
   }
@@ -1432,7 +1481,9 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
   const { currency, rate } = await workspaceCurrency(db, args);
   const today = dayOf(now());
   const from = addDays(today, -63); // 28 + 28 days and a week of margin
-  const { rows } = await dailyRows(db, args, from, today);
+  const { rows, stocksAsOf: carried } = await dailyRows(db, args, from, today);
+  // MRR, actives and trials: the last day rolled for every app (today, or yesterday just after 00:00 UTC).
+  const stockDay = carried ?? today;
   const last = (n: number, offset = 0) => rows.slice(rows.length - n - offset, rows.length - offset);
   const cur28 = last(28);
   const prev28 = last(28, 28);
@@ -1445,6 +1496,7 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
     previous,
     change: previous ? (value - previous) / Math.abs(previous) : null,
     spark,
+    ...(METRIC_INFO[metric].kind === "stock" ? { asOf: stockDay } : {}),
   });
   const m = (metric: Metric, r: DayRow[], before: DayRow | null = null) => convert(metric, metricValue(metric, r, before), rate);
   // Rates as 7-day rolling values for the last 28 days (sparklines).
@@ -1499,6 +1551,15 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
     )
     .bind(args.workspaceId, addDays(today, -56), ...f.params)
     .all<AppDay & { proceeds_usd: number; new_subscriptions: number; renewals: number; one_time_purchases: number; trials_started: number }>();
+  if (stockDay < today) {
+    // Per app as for the totals: today's MRR is the last complete day's (an app not rolled yet has no row for today).
+    const base = new Map(appDays.filter((d) => d.day === stockDay).map((d) => [d.app_id, d.mrr_usd]));
+    for (const d of appDays) if (d.day > stockDay) d.mrr_usd = base.get(d.app_id) ?? 0;
+    for (const [appId, mrr] of base) {
+      if (!appDays.some((d) => d.app_id === appId && d.day === today))
+        appDays.push({ app_id: appId, day: today, gross_usd: 0, proceeds_usd: 0, refunds: 0, new_subscriptions: 0, renewals: 0, one_time_purchases: 0, trials_started: 0, mrr_usd: mrr });
+    }
+  }
   const { results: appMeta } = await db
     .prepare(`SELECT id, name, icon_url, platform FROM apps WHERE workspace_id = ?${appClause(args, "id").sql}`)
     .bind(args.workspaceId, ...f.params)
@@ -1591,6 +1652,7 @@ export const overview = cachedFn("overview", async (db, args: Scope & { tzOffset
   return {
     currency,
     asOf: now(),
+    stocksAsOf: stockDay,
     ...(local ? { today: local.today, yesterday: local.yesterday } : {
       today: {
         date: today,
@@ -1631,6 +1693,8 @@ export const goalsList = cachedFn("goals", async (db, args: Scope): Promise<{ cu
 export const appStats = cachedFn("appStats", async (db, args: Scope) => {
   const { currency, rate } = await workspaceCurrency(db, args);
   const today = dayOf(now());
+  // MRR / actives / trials of the last day rolled for every app (just after 00:00 UTC the new day's rows are missing).
+  const stockDay = await stocksAsOf(db, args, today);
   const { results } = await db
     .prepare(
       `SELECT app_id, SUM(CASE WHEN day > ? THEN gross_usd ELSE 0 END) AS rev,
@@ -1638,9 +1702,9 @@ export const appStats = cachedFn("appStats", async (db, args: Scope) => {
          MAX(CASE WHEN day = ? THEN active_trials END) AS trials
        FROM daily_metrics WHERE workspace_id = ? AND day > ? GROUP BY app_id`,
     )
-    .bind(addDays(today, -28), today, today, today, args.workspaceId, addDays(today, -29))
+    .bind(addDays(today, -28), stockDay, stockDay, stockDay, args.workspaceId, addDays(today, -29))
     .all<{ app_id: string; rev: number; mrr: number | null; subs: number | null; trials: number | null }>();
   const out: Record<string, { mrr: number; revenue28d: number; activeSubscriptions: number; activeTrials: number }> = {};
   for (const r of results) out[r.app_id] = { mrr: (r.mrr ?? 0) * rate, revenue28d: r.rev * rate, activeSubscriptions: r.subs ?? 0, activeTrials: r.trials ?? 0 };
-  return { currency, stats: out };
+  return { currency, stocksAsOf: stockDay, stats: out };
 });
