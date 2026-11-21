@@ -25,6 +25,9 @@ describe("MRR by product / country", () => {
       const start = now - (20 - i * 7) * DAY;
       await post(key, notification(i ? "DID_RENEW" : "SUBSCRIBED", { bundleId, transactionId: `w${i}`, originalTransactionId: "w0", productId: "weekly", purchaseDate: start, expiresDate: start + 7 * DAY, price: 4990, transactionReason: i ? "RENEWAL" : "PURCHASE" }));
     }
+    // A monthly subscriber who upgrades to annual mid-period (the old period is not revoked in the data).
+    await post(key, notification("SUBSCRIBED", { bundleId, transactionId: "m0", productId: "monthly", purchaseDate: now - 25 * DAY, expiresDate: now + 5 * DAY, price: 9990 }));
+    await post(key, notification("DID_CHANGE_RENEWAL_PREF", { bundleId, transactionId: "m1", originalTransactionId: "m0", productId: "annual", purchaseDate: now - 10 * DAY, expiresDate: now + 355 * DAY, price: 29990 }, { subtype: "UPGRADE" }));
     await post(key, notification("ONE_TIME_CHARGE", { bundleId, transactionId: "l1", productId: "lifetime", type: "Non-Consumable", purchaseDate: now - 5 * DAY, price: 49990 }));
 
     for (const metric of ["mrr", "active_subscriptions"]) {
