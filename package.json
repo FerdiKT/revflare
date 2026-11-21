@@ -1,6 +1,6 @@
 {
   "name": "revflare",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Self-hosted in-app purchase and subscription revenue tracker that runs entirely on Cloudflare (Workers, Durable Objects, R2, Workflows): App Store revenue straight from Apple, MRR, churn, cohorts, an iOS app, an MCP server and a CLI.",
   "license": "SEE LICENSE IN LICENSE",
