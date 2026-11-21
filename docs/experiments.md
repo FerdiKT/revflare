@@ -78,11 +78,15 @@ once per day it was exposed (noted in the results).
 
 Window: from the start to the stop (or now). Per variant:
 
-- **Exposed**: unique installs in the window (one Analytics Engine query per variant: install and first exposure time,
-  at most 20,000 installs per experiment spread evenly over the variants, the first by time; more, or sampled data,
-  marks the results `approximate` with a note). `experiment_exposure` is a [key event](funnels.md#exact-key-events):
+- **Exposed**: unique installs in the window. `experiment_exposure` is a [key event](funnels.md#exact-key-events):
   when the stored key events cover the whole window (the experiment started on or after the app's "exact since" day,
-  no capped day), the exposed installs come from the database instead, exactly (no sampling, one read).
+  no capped day), the exposed installs come from the database, exactly (no sampling, one read), up to 1,000,000
+  installs per experiment spread evenly over the variants (`EXPERIMENT_LIMITS.installCap`: 500,000 per variant with
+  two). Otherwise one Analytics Engine query per variant (install and first exposure time), at most 20,000 installs per
+  experiment spread evenly over the variants (`analyticsInstallCap`: the SQL API's result size), the first by time.
+  More than the cap (the variant's `capped`), or sampled data, marks the results `approximate` with a note. The results
+  say how many installs they count (`installsCounted`, per variant `exposed`) and the range of their first exposures
+  (`exposureFrom` / `exposureTo`, per variant `firstExposureAt` / `lastExposureAt`).
 - **Trials**: exposed installs with a free trial that started at or after their first exposure (5 minutes of grace for
   device clocks).
 - **Paid**: exposed installs whose **first paid transaction** happened at or after their first exposure, not fully
@@ -93,7 +97,14 @@ Window: from the start to the stop (or now). Per variant:
 - **Revenue / proceeds**: every transaction (renewals included) of the subscriptions and purchases that began at or
   after the install's first exposure, up to the window's end, refunds subtracted (prorated refunds count their kept
   share), in the workspace currency; renewals of a subscription bought before the exposure (an existing subscriber who
-  opened the app) never count. **Per exposed install** = revenue / exposed.
+  opened the app) never count. **Per exposed install** = revenue / exposed (refunds already subtracted).
+- **Refunds** (`refunds`): of those paid transactions (first periods, renewals, one-time purchases), how many were
+  refunded (fully or partly; `refunded`, `installs`), the refunded amount (`amount`, prorated refunds count their
+  refunded share) against the amount paid before refunds (`gross`), and the rates `countRate` = refunded /
+  transactions, `amountRate` = amount / gross.
+- **Products** (`products`): the same per product id and kind: `conversion` (trial → paid), `new` (paid at once, no
+  trial), `renewal`, `one_time`; with `revenue` after refunds. A trial experiment reads its trial → annual conversions
+  apart from direct annual purchases here.
 
 Purchases come from Revflare's own sales: the exposed installs are looked up in `install_links` (RevflareKit links
 purchases to installs with `appAccountToken`, or the SDK report), then their own transactions — Production only, at
@@ -109,7 +120,13 @@ Monte Carlo of 20,000 draws, seeded by the experiment id (the same data gives th
 - **Lift vs control**: (p_variant − p_control) / p_control per draw: its mean and the 2.5 % / 97.5 % quantiles (95 %
   credible interval).
 
-Revenue per install is a point estimate only (no probability).
+Revenue per install (refunds subtracted) has no closed-form posterior: a **bootstrap** of 4,000 resamples, seeded by
+the experiment id, resamples each variant's exposed installs with replacement (an install's value is its revenue after
+refunds, 0 for most). Most installs spend nothing, so a resample of n installs is drawn exactly as Binomial(n, k/n)
+picks among the k paying installs (the cost follows the payers, not the installs). It gives
+`revenuePerInstallInterval` (95 % percentile interval of the mean), `probabilityBest.revenue_per_install` (share of
+resamples where a variant's mean is the highest) and `lift.revenue_per_install` against the control (null when the
+control earned nothing in more than 10 % of the resamples).
 
 ## Guardrails
 
@@ -118,7 +135,7 @@ least 100 exposed installs and the primary metric has at least 10 conversions in
 `revenue_per_install`). There is no peeking machinery: P(best) is a description of the data so far, read it once the
 guardrails are met and decide on a fixed horizon rather than stopping at the first good-looking day.
 
-A running experiment whose primary metric (`trial_started` or `paid`) reaches P(best) ≥ 95 % with the guardrails met
+A running experiment whose primary metric (`trial_started`, `paid` or `revenue_per_install`) reaches P(best) ≥ 95 % with the guardrails met
 raises one alert of kind `experiment_result` (no push yet); a later computation that is no longer confident resolves it.
 
 ## Results caching

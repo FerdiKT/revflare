@@ -24,6 +24,8 @@ import {
   EXPERIMENT_METRICS,
   type Experiment,
   type ExperimentMetric,
+  type ExperimentProductResult,
+  type ExperimentRefunds,
   type ExperimentResults,
   type ExperimentStatus,
   type ExperimentVariant,
@@ -33,8 +35,8 @@ import {
 import { raiseAlert } from "./alert-store";
 import { backgroundAllowed, metered } from "./budget";
 import { defineDbFunction, type Db } from "./db";
-import { compareRates, seedOf } from "./experiment-stats";
-import { addDays, dayOf, FxCache, keptShareSql } from "./money";
+import { compareMeans, compareRates, seedOf } from "./experiment-stats";
+import { addDays, dayOf, FxCache, keptShareSql, refundedShareSql } from "./money";
 import {
   activeExperiments,
   coerceValue,
@@ -412,6 +414,8 @@ export function snapshotSql(dataset: string, appId: string, id: string, variants
 export interface Exposures {
   /** Variant → [install id, first exposure ms]; null: no install lists (snapshot counts only). */
   lists: Record<string, [string, number][]> | null;
+  /** Variants with more exposed installs than the lists hold. */
+  capped: string[];
   approximate: boolean;
   notes: string[];
 }
@@ -422,8 +426,12 @@ export function resultsWindow(r: Pick<ExperimentRow, "started_at" | "stopped_at"
   return { from: r.started_at, to: Math.max(r.started_at, Math.min(r.stopped_at ?? at, at)) };
 }
 
-/** Installs read per variant: EXPERIMENT_LIMITS.installCap spread over the variants. */
-export const installCapPerVariant = (variants: number) => Math.floor(EXPERIMENT_LIMITS.installCap / Math.max(1, variants));
+/**
+ * Installs read per variant: EXPERIMENT_LIMITS.installCap (exact key events) or analyticsInstallCap (Analytics Engine)
+ * spread over the variants.
+ */
+export const installCapPerVariant = (variants: number, source: "exact" | "analytics" = "exact") =>
+  Math.floor((source === "exact" ? EXPERIMENT_LIMITS.installCap : EXPERIMENT_LIMITS.analyticsInstallCap) / Math.max(1, variants));
 
 /**
  * Exposed installs per variant from Analytics Engine (one query per variant, cached 5 minutes by SQL text). Runs inside
@@ -432,7 +440,7 @@ export const installCapPerVariant = (variants: number) => Math.floor(EXPERIMENT_
 export async function exposuresOf(env: Env, r: ExperimentRow, at: number, excludedInstalls: readonly string[] = [], db?: Db): Promise<Exposures> {
   const w = resultsWindow(r, at);
   const def = definitionOf(r);
-  if (!w) return { lists: null, approximate: false, notes: [] };
+  if (!w) return { lists: null, capped: [], approximate: false, notes: [] };
   // Exact exposures when experiment_exposure key events cover the whole window (worker/lib/key-events.ts).
   if (db && ID_RE.test(r.id)) {
     const cap = installCapPerVariant(def.variants.length);
@@ -446,23 +454,25 @@ export async function exposuresOf(env: Env, r: ExperimentRow, at: number, exclud
     });
     if (exact) {
       const notes = exact.over.map((v) => `Variant ${v} had more than ${cap.toLocaleString("en-US")} exposed installs: the first ${cap.toLocaleString("en-US")} were used.`);
-      return { lists: exact.lists, approximate: notes.length > 0, notes };
+      return { lists: exact.lists, capped: exact.over, approximate: notes.length > 0, notes };
     }
   }
-  if (!analyticsMissing(env).query) return { lists: null, approximate: true, notes: ["Event queries are not configured (CF_ACCOUNT_ID, CF_ANALYTICS_TOKEN): exposures come from the daily snapshot and conversions cannot be measured."] };
-  if (w.from < at - WAE_RETENTION_MS) return { lists: null, approximate: true, notes: ["The experiment started more than 3 months ago (Analytics Engine keeps events 3 months): exposures are the sum of the daily snapshots (installs exposed on several days count more than once), conversions cannot be measured."] };
+  if (!analyticsMissing(env).query) return { lists: null, capped: [], approximate: true, notes: ["Event queries are not configured (CF_ACCOUNT_ID, CF_ANALYTICS_TOKEN): exposures come from the daily snapshot and conversions cannot be measured."] };
+  if (w.from < at - WAE_RETENTION_MS) return { lists: null, capped: [], approximate: true, notes: ["The experiment started more than 3 months ago (Analytics Engine keeps events 3 months): exposures are the sum of the daily snapshots (installs exposed on several days count more than once), conversions cannot be measured."] };
   if (!ID_RE.test(r.id)) throw new Error("Invalid experiment id");
   const { dataset } = analyticsConfig(env);
-  const cap = installCapPerVariant(def.variants.length);
+  const cap = installCapPerVariant(def.variants.length, "analytics");
   // Rounded to 5 minutes: repeated reads hit the query cache.
   const from = Math.floor(w.from / 300_000) * 300_000;
   const to = Math.ceil(w.to / 300_000) * 300_000;
   const notes: string[] = [];
   let sampled = 1;
+  const capped: string[] = [];
   const lists: Record<string, [string, number][]> = {};
   await Promise.all(
     def.variants.map(async (v) => {
       const rows = await runSql(env, exposureSql(dataset, r.app_id, r.id, v.id, from, to, cap + 1, excludedInstalls));
+      if (rows.length > cap) capped.push(v.id);
       if (rows.length > cap) notes.push(`Variant ${v.id} had more than ${cap.toLocaleString("en-US")} exposed installs: the first ${cap.toLocaleString("en-US")} were used.`);
       const list: [string, number][] = [];
       for (const row of rows.slice(0, cap)) {
@@ -475,12 +485,13 @@ export async function exposuresOf(env: Env, r: ExperimentRow, at: number, exclud
     }),
   );
   if (sampled > 1) notes.push(`Analytics Engine sampled this app's events (1 stored event stands for up to ${sampled}): exposed installs are lower than the real ones, rates stay close.`);
-  return { lists, approximate: notes.length > 0, notes };
+  return { lists, capped, approximate: notes.length > 0, notes };
 }
 
 // --- Results ------------------------------------------------------------------------------------------------------------
 
 const KEPT = keptShareSql("t");
+const REFUNDED = refundedShareSql("t");
 
 /** Kinds of a first paid transaction: a subscription's first paid period (bought, or converted from a trial) or a non-subscription purchase. */
 const FIRST_PAID_KINDS = new Set(["new", "conversion", "one_time"]);
@@ -488,12 +499,51 @@ const FIRST_PAID_KINDS = new Set(["new", "conversion", "one_time"]);
 interface Purchase {
   install: string;
   kind: string;
+  product: string;
+  /** Share of the transaction refunded (0, prorated share, 1). */
+  refunded: number;
+  refundedAt: number | null;
   at: number;
   /** When the subscription (or purchase) began: original_purchased_at, else its first stored transaction. */
   orig: number;
   gross: number;
   proceeds: number;
   kept: number;
+}
+
+const emptyRefunds = (): ExperimentRefunds => ({ transactions: 0, refunded: 0, installs: 0, gross: 0, amount: 0, countRate: null, amountRate: null });
+
+const PRODUCT_KINDS = new Set<string>(["conversion", "new", "renewal", "one_time"]);
+
+/** Refund counters of a variant or product, accumulated in USD. */
+class RefundTally {
+  transactions = 0;
+  refunded = 0;
+  gross = 0;
+  amount = 0;
+  revenue = 0;
+  installs = new Set<string>();
+  add(p: Purchase) {
+    this.transactions++;
+    this.gross += p.gross;
+    this.revenue += p.gross * p.kept;
+    if (p.refundedAt !== null) {
+      this.refunded++;
+      this.amount += p.gross * p.refunded;
+      this.installs.add(p.install);
+    }
+  }
+  out(rate: number): ExperimentRefunds {
+    return {
+      transactions: this.transactions,
+      refunded: this.refunded,
+      installs: this.installs.size,
+      gross: this.gross * rate,
+      amount: this.amount * rate,
+      countRate: this.transactions ? this.refunded / this.transactions : null,
+      amountRate: this.gross > 0 ? this.amount / this.gross : null,
+    };
+  }
 }
 
 const notStarted = (r: ExperimentRow, currency: string, at: number): ExperimentResults => {
@@ -506,11 +556,17 @@ const notStarted = (r: ExperimentRow, currency: string, at: number): ExperimentR
     from: null,
     to: null,
     daysRunning: 0,
+    installsCounted: 0,
+    exposureFrom: null,
+    exposureTo: null,
     variants: def.variants.map((v) => ({
       variant: v.id,
       name: v.name,
       weight: v.weight,
       exposed: 0,
+      capped: false,
+      firstExposureAt: null,
+      lastExposureAt: null,
       trials: 0,
       trialRate: null,
       paid: 0,
@@ -519,8 +575,11 @@ const notStarted = (r: ExperimentRow, currency: string, at: number): ExperimentR
       proceeds: 0,
       revenuePerInstall: null,
       proceedsPerInstall: null,
-      probabilityBest: { trial_started: null, paid: null },
-      lift: { trial_started: null, paid: null },
+      revenuePerInstallInterval: null,
+      refunds: emptyRefunds(),
+      products: [],
+      probabilityBest: { trial_started: null, paid: null, revenue_per_install: null },
+      lift: { trial_started: null, paid: null, revenue_per_install: null },
     })),
     enoughData: false,
     reasons: ["The experiment has not started."],
@@ -622,18 +681,41 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
   let approximate = exposures.approximate;
   const snapshotSampled = dailyRows.some((d) => d.si > 1);
 
-  const counts: { exposed: number; trials: number; paid: number; revenue: number; proceeds: number }[] = [];
+  interface Counts {
+    exposed: number;
+    trials: number;
+    paid: number;
+    revenue: number;
+    proceeds: number;
+    first: number | null;
+    last: number | null;
+    /** Revenue (refunds subtracted, USD) of each install that spent something: the bootstrap's non-zero values. */
+    spend: number[];
+    refunds: RefundTally;
+    products: Map<string, RefundTally>;
+  }
+  const counts: Counts[] = [];
   for (const v of def.variants) {
     if (!lists) {
-      counts.push({ exposed: daily.filter((d) => d.variant === v.id).reduce((s, d) => s + d.exposed, 0), trials: 0, paid: 0, revenue: 0, proceeds: 0 });
+      const exposed = daily.filter((d) => d.variant === v.id).reduce((s, d) => s + d.exposed, 0);
+      counts.push({ exposed, trials: 0, paid: 0, revenue: 0, proceeds: 0, first: null, last: null, spend: [], refunds: new RefundTally(), products: new Map() });
       continue;
     }
     const list = lists[v.id] ?? [];
     const first = new Map(list);
     const trials = new Set<string>();
     const paid = new Set<string>();
+    const spend = new Map<string, number>();
+    const refunds = new RefundTally();
+    const products = new Map<string, RefundTally>();
     let revenue = 0;
     let proceeds = 0;
+    let firstAt: number | null = null;
+    let lastAt: number | null = null;
+    for (const [, at] of list) {
+      if (firstAt === null || at < firstAt) firstAt = at;
+      if (lastAt === null || at > lastAt) lastAt = at;
+    }
     const ids = [...first.keys()];
     // CROSS JOIN keeps install_links as the outer loop (one index probe per install) and `+t.purchased_at` keeps the
     // time range off the index: each link reads only its own transactions (idx_tx_original), never a range of the
@@ -642,7 +724,8 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
       const chunk = ids.slice(i, i + CHUNK);
       const { results } = await db
         .prepare(
-          `SELECT l.install_id AS install, t.kind, t.purchased_at AS at, t.gross_usd AS gross, t.proceeds_usd AS proceeds, ${KEPT} AS kept,
+          `SELECT l.install_id AS install, t.kind, t.product_id AS product, t.purchased_at AS at, t.gross_usd AS gross, t.proceeds_usd AS proceeds,
+             ${KEPT} AS kept, ${REFUNDED} AS refunded, t.refunded_at AS refundedAt,
              COALESCE(t.original_purchased_at, (SELECT MIN(o.purchased_at) FROM transactions o WHERE o.app_id = t.app_id AND o.original_transaction_id = t.original_transaction_id)) AS orig
            FROM install_links l CROSS JOIN transactions t ON t.app_id = l.app_id AND t.original_transaction_id = l.original_transaction_id
            WHERE l.app_id = ? AND l.install_id IN (${chunk.map(() => "?").join(",")}) AND t.environment = 'Production'
@@ -659,11 +742,29 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
         else {
           revenue += p.gross * p.kept;
           proceeds += p.proceeds * p.kept;
+          if (p.kept > 0) spend.set(p.install, (spend.get(p.install) ?? 0) + p.gross * p.kept);
           if (p.kept > 0 && FIRST_PAID_KINDS.has(p.kind)) paid.add(p.install);
+          refunds.add(p);
+          const kind = PRODUCT_KINDS.has(p.kind) ? p.kind : "new";
+          const key = `${p.product}\u0000${kind}`;
+          let t = products.get(key);
+          if (!t) products.set(key, (t = new RefundTally()));
+          t.add(p);
         }
       }
     }
-    counts.push({ exposed: list.length, trials: trials.size, paid: paid.size, revenue: revenue * rate, proceeds: proceeds * rate });
+    counts.push({
+      exposed: list.length,
+      trials: trials.size,
+      paid: paid.size,
+      revenue: revenue * rate,
+      proceeds: proceeds * rate,
+      first: firstAt,
+      last: lastAt,
+      spend: [...spend.values()].map((x) => x * rate),
+      refunds,
+      products,
+    });
   }
   if (!lists && daily.length) notes.push("Exposures are the sum of the daily snapshots: installs exposed on several days count more than once.");
   if (snapshotSampled) {
@@ -674,14 +775,24 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
   const measured = !!lists && counts.some((c) => c.exposed > 0);
   const trialStats = measured ? compareRates(counts.map((c) => ({ n: c.exposed, x: c.trials })), { seed: seedOf(`${r.id}:trial`) }) : null;
   const paidStats = measured ? compareRates(counts.map((c) => ({ n: c.exposed, x: c.paid })), { seed: seedOf(`${r.id}:paid`) }) : null;
+  const revenueStats = measured ? compareMeans(counts.map((c) => ({ n: c.exposed, values: c.spend })), { seed: seedOf(`${r.id}:revenue`) }) : null;
   const per = (x: number, n: number) => (n ? x / n : null);
   const variants: ExperimentVariantResult[] = def.variants.map((v, i) => {
     const c = counts[i];
+    const products: ExperimentProductResult[] = [...c.products.entries()]
+      .map(([key, t]) => {
+        const [productId, kind] = key.split("\u0000");
+        return { productId, kind: kind as ExperimentProductResult["kind"], revenue: t.revenue * rate, ...t.out(rate) };
+      })
+      .sort((x, y) => y.revenue - x.revenue || x.productId.localeCompare(y.productId) || x.kind.localeCompare(y.kind));
     return {
       variant: v.id,
       name: v.name,
       weight: v.weight,
       exposed: c.exposed,
+      capped: exposures.capped.includes(v.id),
+      firstExposureAt: c.first,
+      lastExposureAt: c.last,
       trials: c.trials,
       trialRate: lists ? per(c.trials, c.exposed) : null,
       paid: c.paid,
@@ -690,16 +801,25 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
       proceeds: c.proceeds,
       revenuePerInstall: lists ? per(c.revenue, c.exposed) : null,
       proceedsPerInstall: lists ? per(c.proceeds, c.exposed) : null,
-      probabilityBest: { trial_started: trialStats?.probabilityBest[i] ?? null, paid: paidStats?.probabilityBest[i] ?? null },
-      lift: { trial_started: trialStats?.lift[i] ?? null, paid: paidStats?.lift[i] ?? null },
+      revenuePerInstallInterval: revenueStats?.interval[i] ?? null,
+      refunds: c.refunds.out(rate),
+      products,
+      probabilityBest: {
+        trial_started: trialStats?.probabilityBest[i] ?? null,
+        paid: paidStats?.probabilityBest[i] ?? null,
+        revenue_per_install: revenueStats?.probabilityBest[i] ?? null,
+      },
+      lift: { trial_started: trialStats?.lift[i] ?? null, paid: paidStats?.lift[i] ?? null, revenue_per_install: revenueStats?.lift[i] ?? null },
     };
   });
+  const firsts = counts.map((c) => c.first).filter((x): x is number => x !== null);
+  const lasts = counts.map((c) => c.last).filter((x): x is number => x !== null);
   const daysRunning = (w.to - w.from) / DAY;
   const reasons = guardrails(daysRunning, counts, def.primaryMetric);
   if (!lists) reasons.push("Conversions need the exposed installs from Analytics Engine.");
   const enoughData = reasons.length === 0;
   let confident: ExperimentResults["confident"] = null;
-  if (enoughData && def.primaryMetric !== "revenue_per_install") {
+  if (enoughData) {
     const key = def.primaryMetric;
     const best = variants.reduce((a, b) => ((b.probabilityBest[key] ?? 0) > (a.probabilityBest[key] ?? 0) ? b : a));
     const p = best.probabilityBest[key] ?? 0;
@@ -714,6 +834,9 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
     from: w.from,
     to: w.to,
     daysRunning: Math.round(daysRunning * 10) / 10,
+    installsCounted: lists ? counts.reduce((s, c) => s + c.exposed, 0) : 0,
+    exposureFrom: firsts.length ? Math.min(...firsts) : null,
+    exposureTo: lasts.length ? Math.max(...lasts) : null,
     variants,
     enoughData,
     reasons,
@@ -731,9 +854,11 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
   if (confident && r.status === "running") {
     const app = await db.prepare("SELECT name FROM apps WHERE id = ?").bind(r.app_id).first<{ name: string }>();
     const v = variants.find((x) => x.variant === confident!.variant)!;
-    const metric = def.primaryMetric === "trial_started" ? "trial start rate" : "paid conversion rate";
-    const lift = def.primaryMetric === "trial_started" ? v.lift.trial_started : v.lift.paid;
+    const m = def.primaryMetric;
+    const metric = m === "trial_started" ? "trial start rate" : m === "paid" ? "paid conversion rate" : "revenue per install (refunds subtracted)";
+    const lift = v.lift[m];
     const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+    const value = m === "revenue_per_install" ? `${(v.revenuePerInstall ?? 0).toFixed(3)} ${currency}` : pct((m === "trial_started" ? v.trialRate : v.paidRate) ?? 0);
     // No push: the iOS app has no texts for it yet (loc-keys); the alert shows in Alerts and the web app.
     await raiseAlert(env, db, {
       workspaceId: r.workspace_id,
@@ -743,7 +868,7 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
       severity: "info",
       title: `Experiment "${r.name}" in ${app?.name ?? "an app"}: ${v.name} (${v.variant}) is ahead`,
       body:
-        `${v.name} has a ${pct(confident.probability)} probability to have the best ${metric} (${pct((def.primaryMetric === "trial_started" ? v.trialRate : v.paidRate) ?? 0)} of ${v.exposed} exposed installs)` +
+        `${v.name} has a ${pct(confident.probability)} probability to have the best ${metric} (${value} over ${v.exposed} exposed installs)` +
         (lift ? `, ${lift.expected >= 0 ? "+" : ""}${pct(lift.expected)} against the control (95% interval ${pct(lift.low)} to ${pct(lift.high)})` : "") +
         `. Stop the experiment and roll out the winner when you are ready.`,
     });

@@ -37,6 +37,9 @@ const variant = (v: string, name: string, exposed: number, paid: number, pBest: 
   name,
   weight: 50,
   exposed,
+  capped: false,
+  firstExposureAt: T,
+  lastExposureAt: T + 9 * 86_400_000,
   trials: 10,
   trialRate: 10 / exposed,
   paid,
@@ -45,8 +48,14 @@ const variant = (v: string, name: string, exposed: number, paid: number, pBest: 
   proceeds: paid * 8.49,
   revenuePerInstall: (paid * 9.99) / exposed,
   proceedsPerInstall: (paid * 8.49) / exposed,
-  probabilityBest: { trial_started: 0.5, paid: pBest },
-  lift: { trial_started: null, paid: lift },
+  revenuePerInstallInterval: { low: (paid * 9.99) / exposed / 2, high: ((paid * 9.99) / exposed) * 1.5 },
+  refunds: { transactions: paid + 1, refunded: 1, installs: 1, gross: (paid + 1) * 9.99, amount: 9.99, countRate: 1 / (paid + 1), amountRate: 1 / (paid + 1) },
+  products: [
+    { productId: "com.example.annual", kind: "conversion" as const, transactions: paid, refunded: 0, installs: 0, gross: paid * 9.99, amount: 0, countRate: 0, amountRate: 0, revenue: paid * 9.99 },
+    { productId: "com.example.weekly", kind: "new" as const, transactions: 1, refunded: 1, installs: 1, gross: 9.99, amount: 9.99, countRate: 1, amountRate: 1, revenue: 0 },
+  ],
+  probabilityBest: { trial_started: 0.5, paid: pBest, revenue_per_install: pBest },
+  lift: { trial_started: null, paid: lift, revenue_per_install: lift },
 });
 const RESULTS: ExperimentResults = {
   experimentId: EXP.id,
@@ -56,6 +65,9 @@ const RESULTS: ExperimentResults = {
   from: T,
   to: T + 10 * 86_400_000,
   daysRunning: 10,
+  installsCounted: 240,
+  exposureFrom: T,
+  exposureTo: T + 9 * 86_400_000,
   variants: [variant("a", "Control", 120, 3, 0.002, null), variant("b", "Bold", 120, 12, 0.998, { expected: 2.5, low: 0.4, high: 6.1 })],
   enoughData: true,
   reasons: [],
@@ -82,7 +94,11 @@ describe("experiments", () => {
     expect(out.stdout).toMatch(/b\s+Bold\s+50%\s+paywall_variant="bold"/);
     out.stdout = "";
     expect(await run(["experiments", "app_1", "results", EXP.id, "--no-color"], { env, fetch })).toBe(0);
-    expect(out.stdout).toMatch(/b Bold\s+120\s+8\.33%\s+10%\s+\$1\.00\s+99\.8%\s+\+250\.0% \(\+40\.0% to \+610\.0%\)/);
+    expect(out.stdout).toMatch(/b Bold\s+120\s+8\.33%\s+10%\s+\$0\.999\s+\$0\.500 to \$1\.499\s+1 \(7\.7%\)\s+99\.8%\s+\+250\.0% \(\+40\.0% to \+610\.0%\)/);
+    expect(out.stdout).toContain("240 exposed installs counted · first exposures 2026-10-01 to 2026-10-10 (UTC) · all of them");
+    expect(out.stdout).toContain("refunds subtracted");
+    expect(out.stdout).toMatch(/b\s+com\.example\.annual\s+trial → paid\s+12\s+0\s+0%\s+\$0\.00\s+0%\s+\$119\.88/);
+    expect(out.stdout).toMatch(/b\s+all products\s+-\s+13\s+1\s+7\.7%\s+\$9\.99\s+7\.7%\s+\$119\.88/);
     expect(out.stdout).toContain("Confident: variant b is best with 99.8% probability.");
     out.stdout = "";
     const waiting = { ...RESULTS, enoughData: false, confident: null, reasons: ["Running for 3 of at least 7 days."] };

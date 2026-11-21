@@ -498,7 +498,9 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
     get_experiment_results: {
       description:
         "Results of an experiment: per variant exposed installs (sent experiment_exposure since the start), trials and trialRate, paid conversions and paidRate (first paid period or one-time purchase begun after the first exposure, refunds subtracted), " +
-        "revenue / proceeds of what was bought after the first exposure (renewals included) and per exposed install (workspace currency), probabilityBest (Bayesian, Beta posteriors) and lift vs the control with a 95% credible interval for trial_started and paid. " +
+        "revenue / proceeds of what was bought after the first exposure (renewals included) and per exposed install (workspace currency), revenuePerInstall (refunds already subtracted) with revenuePerInstallInterval (95% bootstrap), probabilityBest (Beta posteriors for trial_started and paid, bootstrap for revenue_per_install) and lift vs the control with a 95% interval. " +
+        "installsCounted / exposureFrom / exposureTo: how many exposed installs the results count and the range of their first exposures (per variant exposed, capped, firstExposureAt, lastExposureAt). " +
+        "refunds per variant: paid transactions, refunded (count, installs), amount vs gross, countRate and amountRate; products: the same per product and kind (conversion = trial → paid, new = paid at once, renewal, one_time) with revenue after refunds. " +
         "enoughData = guardrails met (7 days, 100 exposed installs per variant, 10 conversions on the primary metric); reasons says what is missing — do not call a winner before. " +
         "confident = P(best) >= 95% on the primary metric. approximate / notes: sampling or caps. Stored results, recomputed by the server every few hours (generatedAt); final (frozen) after the stop.",
       inputSchema: {

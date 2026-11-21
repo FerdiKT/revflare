@@ -55,6 +55,19 @@ function printExperiment(x: Experiment) {
   );
 }
 
+/** Money per install with 3 decimals ($0.136): cents hide the difference between variants. */
+function fmtPerInstall(n: number | null | undefined, currency: string): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "-";
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(n);
+  } catch {
+    return `${n.toFixed(3)} ${currency}`;
+  }
+}
+
+const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const KIND_LABELS: Record<string, string> = { conversion: "trial → paid", new: "paid at once", renewal: "renewal", one_time: "one-time" };
+
 function printResults(name: string, r: ExperimentResults) {
   const m = r.primaryMetric;
   println(`${c.bold(name)}  ${fmtStatus(r.status)}  ${c.gray(`${r.daysRunning} days · primary: ${METRIC_LABELS[m] ?? m}${r.frozen ? " · final" : ""}`)}`);
@@ -62,8 +75,16 @@ function printResults(name: string, r: ExperimentResults) {
     for (const why of r.reasons) println(c.gray(why));
     return;
   }
-  const best = (v: ExperimentResults["variants"][number]) => (m === "revenue_per_install" ? null : v.probabilityBest[m]);
-  const lift = (v: ExperimentResults["variants"][number]) => (m === "revenue_per_install" ? null : v.lift[m]);
+  if (r.installsCounted) {
+    const range = r.exposureFrom !== null && r.exposureTo !== null ? ` · first exposures ${day(r.exposureFrom)} to ${day(r.exposureTo)} (UTC)` : "";
+    const capped = r.variants.filter((v) => v.capped).map((v) => v.variant);
+    println(c.gray(`${fmtNum(r.installsCounted)} exposed installs counted${range}${capped.length ? ` · capped: ${capped.join(", ")}` : " · all of them"}`));
+  }
+  type V = ExperimentResults["variants"][number];
+  const best = (v: V) => v.probabilityBest?.[m] ?? null;
+  const lift = (v: V) => v.lift?.[m] ?? null;
+  const interval = (v: V) => (v.revenuePerInstallInterval ? c.gray(`${fmtPerInstall(v.revenuePerInstallInterval.low, r.currency)} to ${fmtPerInstall(v.revenuePerInstallInterval.high, r.currency)}`) : "-");
+  const refunds = (v: V) => (v.refunds ? `${fmtNum(v.refunds.refunded)} ${c.gray(`(${fmtPct(v.refunds.countRate, 1)})`)}` : "-");
   println(
     table(
       [
@@ -71,7 +92,9 @@ function printResults(name: string, r: ExperimentResults) {
         { header: "EXPOSED", align: "right" },
         { header: "TRIAL %", align: "right" },
         { header: "PAID %", align: "right" },
-        { header: "REV/INSTALL", align: "right" },
+        { header: "REV/INSTALL*", align: "right" },
+        { header: "95% INTERVAL" },
+        { header: "REFUNDS", align: "right" },
         { header: "P(BEST)", align: "right" },
         { header: "LIFT VS CONTROL (95%)", flex: true },
       ],
@@ -80,16 +103,66 @@ function printResults(name: string, r: ExperimentResults) {
         fmtNum(v.exposed),
         fmtPct(v.trialRate),
         fmtPct(v.paidRate),
-        v.revenuePerInstall === null ? "-" : fmtMoney(v.revenuePerInstall, r.currency),
+        fmtPerInstall(v.revenuePerInstall, r.currency),
+        interval(v),
+        refunds(v),
         r.enoughData && best(v) !== null ? fmtPct(best(v), 1) : c.gray("-"),
         r.enoughData ? fmtLift(lift(v)) : c.gray("-"),
       ]),
     ),
   );
+  println(c.gray("* Revenue per exposed install, refunds subtracted (gross, before Apple's commission)."));
   if (!r.enoughData) println(`${c.yellow("Not enough data yet:")} ${r.reasons.join(" ")}`);
   else if (r.confident) println(`${c.green("Confident:")} variant ${r.confident.variant} is best with ${fmtPct(r.confident.probability, 1)} probability.`);
-  else if (m === "revenue_per_install") println(c.gray("Revenue per install is a point estimate (no probability)."));
   else println(c.gray("No variant is ahead with 95% probability yet."));
+
+  if (r.variants.some((v) => v.products?.length)) {
+    println("");
+    println(c.bold("Refunds by product"));
+    println(
+      table(
+        [
+          { header: "VARIANT" },
+          { header: "PRODUCT", max: 40 },
+          { header: "KIND" },
+          { header: "PAID TX", align: "right" },
+          { header: "REFUNDED", align: "right" },
+          { header: "REFUND %", align: "right" },
+          { header: "REFUNDED AMOUNT", align: "right" },
+          { header: "AMOUNT %", align: "right" },
+          { header: "REVENUE*", align: "right" },
+        ],
+        r.variants.flatMap((v) => [
+          ...(v.products ?? []).map((p) => [
+            v.variant,
+            p.productId,
+            KIND_LABELS[p.kind] ?? p.kind,
+            fmtNum(p.transactions),
+            fmtNum(p.refunded),
+            fmtPct(p.countRate, 1),
+            fmtMoney(p.amount, r.currency),
+            fmtPct(p.amountRate, 1),
+            fmtMoney(p.revenue, r.currency),
+          ]),
+          ...(v.refunds
+            ? [
+                [
+                  c.bold(v.variant),
+                  c.bold("all products"),
+                  "",
+                  fmtNum(v.refunds.transactions),
+                  fmtNum(v.refunds.refunded),
+                  fmtPct(v.refunds.countRate, 1),
+                  fmtMoney(v.refunds.amount, r.currency),
+                  fmtPct(v.refunds.amountRate, 1),
+                  fmtMoney(v.revenue, r.currency),
+                ],
+              ]
+            : []),
+        ]),
+      ),
+    );
+  }
   if (r.approximate) println(c.yellow("Approximate:"));
   for (const n of r.notes) println(c.gray(`- ${n}`));
 }
@@ -111,7 +184,8 @@ export const experiments: Command = {
     "  stop <id>                           stop measuring (devices keep their variant until rollout or archive)\n" +
     "  rollout <id> <variant>              the variant's values become the parameters' defaults; the experiment ends\n" +
     "  archive <id>                        end without changing the defaults\n" +
-    "  results <id> [--refresh]            per variant: exposed, trial %, paid %, revenue per install, P(best), lift\n" +
+    "  results <id> [--refresh]            per variant: exposed, trial %, paid %, revenue per install (refunds subtracted,\n" +
+    "                                      95% bootstrap interval), refunds (overall and per product / kind), P(best), lift\n" +
     "                                      (stored results, recomputed every few hours; --refresh: now, once an hour)\n" +
     "Changes need the manage permission.",
   options: {

@@ -102,7 +102,7 @@ revflare config <app> set <key> <value> [--type string|number|boolean|json] [--c
 revflare config <app> rm <key> [--condition <name>]
 revflare experiments <app>                         # A/B experiments on remote config parameters: id, name, status, parameters, variants, metric
 revflare experiments <app> show <id>               # parameters, variants (a = control) and their values, targeting, traffic, dates
-revflare experiments <app> results <id> [--refresh] # per variant: exposed installs, trial %, paid %, revenue / install, P(best), lift vs control (95% interval)
+revflare experiments <app> results <id> [--refresh] # per variant: exposed installs counted (+ first-exposure range), trial %, paid %, revenue / install (refunds subtracted, 95% bootstrap interval), refunds (count, amount, rates; per product: trial → paid vs paid at once vs renewal), P(best), lift vs control (95% interval)
 revflare experiments <app> create --file exp.json  # a draft: { name, keys, variants: [{ name?, weight?, values }], targeting?, traffic?, primaryMetric?, hypothesis? } (manage)
 revflare experiments <app> start|stop|archive <id> # lifecycle (manage); stop keeps devices on their variant
 revflare experiments <app> rollout <id> <variant>  # the variant's values become the parameters' defaults; the experiment ends (manage)

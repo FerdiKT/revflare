@@ -301,6 +301,30 @@ describe("experiments", { timeout: 120_000 }, () => {
     expect(b.lift.paid.low).toBeGreaterThan(0);
     expect(r.confident).toEqual({ variant: "b", probability: b.probabilityBest.paid });
     expect(r.daysRunning).toBeGreaterThanOrEqual(10);
+    // Every exposed install counted, with the range of their first exposures.
+    expect(r).toMatchObject({ installsCounted: 240, exposureFrom: exposedAt(0), exposureTo: exposedAt(119) });
+    expect([a.capped, b.capped]).toEqual([false, false]);
+    expect([b.firstExposureAt, b.lastExposureAt]).toEqual([exposedAt(0), exposedAt(119)]);
+    // Revenue per install: bootstrap interval around the mean, probability to be best, lift.
+    expect(b.revenuePerInstallInterval.low).toBeLessThan(b.revenuePerInstall);
+    expect(b.revenuePerInstallInterval.high).toBeGreaterThan(b.revenuePerInstall);
+    expect(b.probabilityBest.revenue_per_install).toBeGreaterThan(0.95);
+    expect(a.probabilityBest.revenue_per_install + b.probabilityBest.revenue_per_install).toBeCloseTo(1, 9);
+    expect(a.lift.revenue_per_install).toBeNull();
+    expect(b.lift.revenue_per_install.expected).toBeGreaterThan(1);
+    // Refunds: b's 15 paid transactions after the exposure (12 + 32's refunded one + 36's purchase and renewal).
+    expect(a.refunds).toMatchObject({ transactions: 3, refunded: 0, installs: 0, amount: 0, countRate: 0, amountRate: 0 });
+    expect(b.refunds).toMatchObject({ transactions: 15, refunded: 1, installs: 1 });
+    expect(b.refunds.gross).toBeCloseTo(15 * 9.99, 6);
+    expect(b.refunds.amount).toBeCloseTo(9.99, 6);
+    expect(b.refunds.countRate).toBeCloseTo(1 / 15, 9);
+    expect(b.refunds.amountRate).toBeCloseTo(1 / 15, 9);
+    // Per product and kind: direct purchases apart from renewals; revenue after refunds.
+    expect(b.products.map((x: { kind: string; transactions: number; refunded: number }) => [x.kind, x.transactions, x.refunded])).toEqual([
+      ["new", 14, 1],
+      ["renewal", 1, 0],
+    ]);
+    expect(b.products[0].revenue).toBeCloseTo(13 * 9.99, 6);
 
     // One experiment_result alert (no push), linked to the experiment.
     const alerts = (await call(client, "/api/v1/alerts")).json.items.filter((x: { kind: string }) => x.kind === "experiment_result");

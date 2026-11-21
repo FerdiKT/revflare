@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beta, compareRates, rng, seedOf } from "../worker/lib/experiment-stats";
+import { beta, compareMeans, compareRates, rng, seedOf } from "../worker/lib/experiment-stats";
 import { exposureSql, guardrails, parseExperiment, snapshotSql } from "../worker/lib/experiments";
 import { assignVariant, compile, evaluate, experimentConflict, parseRemoteConfig, percentBucket, sdkBody, type ActiveExperiment, type StoredRemoteConfig } from "../worker/lib/remote-config";
 
@@ -201,6 +201,45 @@ describe("statistics", () => {
     expect(tie.lift[1]!.high).toBeGreaterThan(0);
     // Same data, same seed: same answer.
     expect(compareRates([{ n: 10, x: 1 }, { n: 10, x: 3 }], { seed: 9 })).toEqual(compareRates([{ n: 10, x: 1 }, { n: 10, x: 3 }], { seed: 9 }));
+  });
+
+  it("bootstraps revenue per install from the payers only", () => {
+    // 10,000 installs each: 100 payers of 10 against 150 payers of 10 (means 0.10 and 0.15).
+    const clear = compareMeans(
+      [
+        { n: 10_000, values: Array(100).fill(10) },
+        { n: 10_000, values: Array(150).fill(10) },
+      ],
+      { seed: 1 },
+    );
+    expect(clear.probabilityBest[1]).toBeGreaterThan(0.99);
+    expect(clear.probabilityBest[0] + clear.probabilityBest[1]).toBeCloseTo(1, 9);
+    expect(clear.interval[0]!.low).toBeLessThan(0.1);
+    expect(clear.interval[0]!.high).toBeGreaterThan(0.1);
+    // Standard error of the mean ≈ 10 · sqrt(p(1 − p) / n) = 0.00995: the 95% interval spans about ±0.0195.
+    expect(clear.interval[0]!.high - clear.interval[0]!.low).toBeGreaterThan(0.03);
+    expect(clear.interval[0]!.high - clear.interval[0]!.low).toBeLessThan(0.05);
+    expect(clear.lift[0]).toBeNull();
+    expect(clear.lift[1]!.expected).toBeGreaterThan(0.4);
+    expect(clear.lift[1]!.expected).toBeLessThan(0.65);
+    expect(clear.lift[1]!.low).toBeGreaterThan(0.1);
+
+    const tie = compareMeans(
+      [
+        { n: 5000, values: [5, 10, 20, 50, ...Array(46).fill(10)] },
+        { n: 5000, values: [5, 10, 20, 50, ...Array(46).fill(10)] },
+      ],
+      { seed: 2 },
+    );
+    expect(Math.abs(tie.probabilityBest[0] - 0.5)).toBeLessThan(0.05);
+    expect(tie.lift[1]!.low).toBeLessThan(0);
+    expect(tie.lift[1]!.high).toBeGreaterThan(0);
+    // No payers in the control: no relative lift; no installs: no interval.
+    const none = compareMeans([{ n: 1000, values: [] }, { n: 0, values: [] }], { seed: 3 });
+    expect(none.lift[1]).toBeNull();
+    expect(none.interval).toEqual([{ low: 0, high: 0 }, null]);
+    expect(none.probabilityBest).toEqual([1, 0]);
+    expect(compareMeans([{ n: 50, values: [1, 2] }, { n: 40, values: [3] }], { seed: 9 })).toEqual(compareMeans([{ n: 50, values: [1, 2] }, { n: 40, values: [3] }], { seed: 9 }));
   });
 
   it("applies the guardrails", () => {

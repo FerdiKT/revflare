@@ -1736,7 +1736,10 @@ export const EXPERIMENT_LIMITS = {
   minDays: 7,
   minExposed: 100,
   minConversions: 10,
-  installCap: 20_000,
+  /** Exposed installs counted over all variants (split evenly) when exposures come from the exact key events. */
+  installCap: 1_000_000,
+  /** The same when they come from Analytics Engine (one query per variant: its result size is limited). */
+  analyticsInstallCap: 20_000,
 } as const;
 /** The event RevflareKit sends when the app reads an experiment's parameter: props { experiment: id, variant: "<id>:<variant>" }. */
 export const EXPERIMENT_EXPOSURE_EVENT = "experiment_exposure";
@@ -1785,19 +1788,49 @@ export interface ExperimentInput {
   primaryMetric?: ExperimentMetric;
 }
 
-/** Posterior of a rate's lift against the control: mean and 95% credible interval (relative, 0.1 = +10%). */
+/** Lift against the control: mean and 95% interval (relative, 0.1 = +10%); rates: Beta posterior, revenue per install: bootstrap. */
 export interface ExperimentLift {
   expected: number;
   low: number;
   high: number;
 }
 
+/** Refunds of an experiment variant's paid transactions (begun after the first exposure). */
+export interface ExperimentRefunds {
+  /** Paid transactions (first periods, renewals, one-time purchases). */
+  transactions: number;
+  /** Of them, refunded (fully or partly). */
+  refunded: number;
+  /** Installs with at least one refunded transaction. */
+  installs: number;
+  /** Paid before refunds and refunded amount, in `currency`. */
+  gross: number;
+  amount: number;
+  /** refunded / transactions (null without paid transactions). */
+  countRate: number | null;
+  /** amount / gross (null without paid transactions). */
+  amountRate: number | null;
+}
+
+/** One product and transaction kind of a variant: conversion = trial → paid, new = paid at once (no trial). */
+export interface ExperimentProductResult extends ExperimentRefunds {
+  productId: string;
+  kind: "conversion" | "new" | "renewal" | "one_time";
+  /** Revenue after refunds, in `currency`. */
+  revenue: number;
+}
+
 export interface ExperimentVariantResult {
   variant: string;
   name: string;
   weight: number;
-  /** Unique installs that sent experiment_exposure for this variant since the start. */
+  /** Unique installs that sent experiment_exposure for this variant since the start (counted in the results). */
   exposed: number;
+  /** The variant had more exposed installs than the results count (EXPERIMENT_LIMITS): only the first were used. */
+  capped: boolean;
+  /** First and last first-exposure time among the counted installs (the installs the results cover). */
+  firstExposureAt: number | null;
+  lastExposureAt: number | null;
   /** Exposed installs that started a trial after their first exposure. */
   trials: number;
   trialRate: number | null;
@@ -1807,12 +1840,19 @@ export interface ExperimentVariantResult {
   /** Paid after the first exposure, refunds subtracted, in `currency`. */
   revenue: number;
   proceeds: number;
+  /** Revenue and proceeds per exposed install, refunds subtracted. */
   revenuePerInstall: number | null;
   proceedsPerInstall: number | null;
-  /** Probability to be the best variant (Beta posteriors, Monte Carlo); null without exposed installs. */
-  probabilityBest: { trial_started: number | null; paid: number | null };
+  /** 95% bootstrap interval of revenuePerInstall (null without exposed installs). */
+  revenuePerInstallInterval: { low: number; high: number } | null;
+  /** Refunds of the variant's paid transactions. */
+  refunds: ExperimentRefunds;
+  /** Per product and kind (trial conversions apart from direct purchases and renewals), most revenue first. */
+  products: ExperimentProductResult[];
+  /** Probability to be the best variant (rates: Beta posteriors, Monte Carlo; revenue per install: bootstrap); null without exposed installs. */
+  probabilityBest: { trial_started: number | null; paid: number | null; revenue_per_install: number | null };
   /** Against the control (null for the control). */
-  lift: { trial_started: ExperimentLift | null; paid: ExperimentLift | null };
+  lift: { trial_started: ExperimentLift | null; paid: ExperimentLift | null; revenue_per_install: ExperimentLift | null };
 }
 
 /** GET /apps/:id/experiments/:eid/results. */
@@ -1825,12 +1865,16 @@ export interface ExperimentResults {
   from: number | null;
   to: number | null;
   daysRunning: number;
+  /** Exposed installs counted over all variants, and the range of their first exposures. */
+  installsCounted: number;
+  exposureFrom: number | null;
+  exposureTo: number | null;
   variants: ExperimentVariantResult[];
   /** Guardrails met (days, exposed per variant, conversions): only then are probabilities meant to be read. */
   enoughData: boolean;
   /** Why there is not enough data yet. */
   reasons: string[];
-  /** P(best) ≥ 95% on the primary metric (trial_started / paid) with the guardrails met. */
+  /** P(best) ≥ 95% on the primary metric (trial_started / paid / revenue_per_install) with the guardrails met. */
   confident: { variant: string; probability: number } | null;
   /** events: install lists from Analytics Engine; snapshot: daily counts only (no conversions). */
   exposureSource: "events" | "snapshot" | "none";

@@ -2,7 +2,7 @@
 // Beta(1 + x, 1 + n − x) posterior (uniform prior, x conversions out of n exposed installs). A seeded Monte Carlo
 // (20,000 draws by default) gives each variant's probability to be the best and, against the control (index 0), the
 // expected relative lift with its 95% credible interval. Deterministic for a seed, so a result does not move between
-// reads of the same data.
+// reads of the same data. Revenue per install: a seeded bootstrap of the mean (compareMeans).
 
 import type { ExperimentLift } from "../../shared/types";
 
@@ -106,6 +106,85 @@ export function compareRates(arms: { n: number; x: number }[], opts: { draws?: n
       for (const v of l) sum += v;
       const sorted = l.slice().sort();
       return { expected: sum / draws, low: quantile(sorted, 0.025), high: quantile(sorted, 0.975) };
+    }),
+  };
+}
+
+/** Bootstrap resamples of a mean (revenue per install). */
+export const DEFAULT_BOOTSTRAP = 4_000;
+
+export interface MeanSummary {
+  /** Per variant: share of resamples where its mean is the highest. */
+  probabilityBest: number[];
+  /** Per variant (index 0 = control: null): relative lift of the mean (m_v − m_0) / m_0, 95% percentile interval. */
+  lift: (ExperimentLift | null)[];
+  /** Per variant: 95% percentile interval of the mean; null without installs. */
+  interval: ({ low: number; high: number } | null)[];
+}
+
+/**
+ * Draws Binomial(n, p) by geometric skips: O(result) per draw, exact. Used for the number of resampled installs that
+ * land on a non-zero value (most installs spend nothing, so the payers are few).
+ */
+function binomialSparse(n: number, p: number, rand: () => number): number {
+  if (p <= 0 || n <= 0) return 0;
+  if (p >= 1) return n;
+  const lq = Math.log(1 - p);
+  let pos = 0;
+  let count = 0;
+  for (;;) {
+    let u = 0;
+    while (u <= Number.EPSILON) u = rand();
+    pos += Math.floor(Math.log(u) / lq) + 1;
+    if (pos > n) return count;
+    count++;
+  }
+}
+
+/**
+ * Non-parametric bootstrap of each variant's mean value per install: `n` installs of which only `values` (the
+ * non-zero ones) are listed, the others count 0. A resample of n installs with replacement is drawn exactly as
+ * Binomial(n, k/n) non-zero picks among the k values, so the cost follows the payers, not the installs. Seeded: the
+ * same data gives the same result.
+ */
+export function compareMeans(arms: { n: number; values: number[] }[], opts: { draws?: number; seed?: number } = {}): MeanSummary {
+  const k = arms.length;
+  const draws = opts.draws ?? DEFAULT_BOOTSTRAP;
+  const rand = rng(opts.seed ?? 1);
+  const means = arms.map(() => new Float64Array(draws));
+  const wins = new Array<number>(k).fill(0);
+  for (let i = 0; i < draws; i++) {
+    let best = -1;
+    for (let j = 0; j < k; j++) {
+      const { n, values } = arms[j];
+      let m = 0;
+      if (n > 0 && values.length) {
+        const picks = binomialSparse(n, Math.min(1, values.length / n), rand);
+        let sum = 0;
+        for (let p = 0; p < picks; p++) sum += values[Math.floor(rand() * values.length)];
+        m = sum / n;
+      }
+      means[j][i] = m;
+      if (n > 0 && (best < 0 || m > means[best][i])) best = j;
+    }
+    if (best >= 0) wins[best]++;
+  }
+  const anyInstalls = arms.some((a) => a.n > 0);
+  return {
+    probabilityBest: wins.map((w) => (anyInstalls ? w / draws : 0)),
+    interval: means.map((m, j) => {
+      if (arms[j].n <= 0) return null;
+      const sorted = m.slice().sort();
+      return { low: quantile(sorted, 0.025), high: quantile(sorted, 0.975) };
+    }),
+    lift: means.map((m, j) => {
+      if (j === 0 || arms[j].n <= 0 || arms[0].n <= 0) return null;
+      const l: number[] = [];
+      for (let i = 0; i < draws; i++) if (means[0][i] > 0) l.push((m[i] - means[0][i]) / means[0][i]);
+      // The control earned nothing in (almost) every resample: a relative lift means nothing.
+      if (l.length < draws * 0.9) return null;
+      const sorted = Float64Array.from(l).sort();
+      return { expected: l.reduce((s, v) => s + v, 0) / l.length, low: quantile(sorted, 0.025), high: quantile(sorted, 0.975) };
     }),
   };
 }

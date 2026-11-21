@@ -401,11 +401,20 @@ function Definition({ e }: { e: Experiment }) {
 
 // --- Results ----------------------------------------------------------------------------------------------------------
 
-type RateMetric = "trial_started" | "paid";
+/** Money per install with 3 decimals ($0.136): cents hide the difference between variants. */
+const perInstall = (value: number, currency: string) => {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 3, maximumFractionDigits: 3 }).format(value);
+  } catch {
+    return `${value.toFixed(3)} ${currency}`;
+  }
+};
+const KIND_LABEL: Record<string, string> = { conversion: "Trial → paid", new: "Paid at once", renewal: "Renewal", one_time: "One-time" };
+const METRIC_SHORT: Record<ExperimentMetric, string> = { trial_started: "trial", paid: "paid", revenue_per_install: "rev / install" };
 
 function Results({ appId, e }: { appId: string; e: Experiment }) {
   const r = useFetch(`experiment-results:${appId}:${e.id}`, () => api.apps.experiments.results(appId, e.id));
-  const [metric, setMetric] = useState<RateMetric>(e.primaryMetric === "trial_started" ? "trial_started" : "paid");
+  const [metric, setMetric] = useState<ExperimentMetric>(e.primaryMetric);
   const [refreshing, setRefreshing] = useState(false);
   const toast = useToast();
   const data = r.data;
@@ -431,7 +440,10 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
     );
   const control = data.variants[0];
   const measured = data.exposureSource === "events";
-  const leader = data.variants.reduce((a, b) => ((b.probabilityBest[metric] ?? -1) > (a.probabilityBest[metric] ?? -1) ? b : a), control);
+  // Results stored before refunds and the revenue bootstrap existed lack those fields until they are recomputed.
+  const pBest = (v: (typeof data.variants)[number]) => v.probabilityBest[metric] ?? null;
+  const leader = data.variants.reduce((a, b) => ((pBest(b) ?? -1) > (pBest(a) ?? -1) ? b : a), control);
+  const capped = data.variants.filter((v) => v.capped).map((v) => v.variant);
 
   return (
     <>
@@ -454,7 +466,7 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
         <div className="mt-5 flex items-start gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-900 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900">
           <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
           <p>
-            <strong className="font-medium">{data.variants.find((v) => v.variant === data.confident!.variant)?.name}</strong> has a {percent(data.confident.probability)} probability to have the best {METRIC_LABEL[data.primaryMetric].toLowerCase()} rate.
+            <strong className="font-medium">{data.variants.find((v) => v.variant === data.confident!.variant)?.name}</strong> has a {percent(data.confident.probability)} probability to have the best {data.primaryMetric === "revenue_per_install" ? "revenue per install (refunds subtracted)" : `${METRIC_LABEL[data.primaryMetric].toLowerCase()} rate`}.
             {data.status === "running" ? " Stop the experiment and roll it out when you are ready." : ""}
           </p>
         </div>
@@ -476,6 +488,13 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
             <>
               {data.from ? `${date(data.from)} – ${data.to ? date(data.to) : "now"}` : ""} · {data.daysRunning} days · conversions after each install&rsquo;s first exposure · {data.frozen ? "computed" : "updated"} {ago(data.generatedAt)}
               {!data.frozen && " (every few hours)"}
+              {measured && data.installsCounted !== undefined && (
+                <span className="block">
+                  {fullNumber(data.installsCounted)} exposed installs counted
+                  {data.exposureFrom && data.exposureTo ? `, first exposed ${date(data.exposureFrom)} – ${date(data.exposureTo)}` : ""}
+                  {capped.length ? ` · capped: variant ${capped.join(", ")} (only the first installs)` : " · all of them"}
+                </span>
+              )}
             </>
           }
           action={
@@ -485,7 +504,17 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
                   Refresh
                 </Button>
               )}
-              <Segmented size="sm" label="Probability metric" options={[{ value: "trial_started" as const, label: "Trial started" }, { value: "paid" as const, label: "Paid" }]} value={metric} onChange={setMetric} />
+              <Segmented
+                size="sm"
+                label="Probability metric"
+                options={[
+                  { value: "trial_started" as const, label: "Trial started" },
+                  { value: "paid" as const, label: "Paid" },
+                  { value: "revenue_per_install" as const, label: "Rev / install" },
+                ]}
+                value={metric}
+                onChange={setMetric}
+              />
             </div>
           }
         />
@@ -496,15 +525,20 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
               <th className={cn(th, "text-right")}>Exposed</th>
               <th className={cn(th, "text-right")}>Trial %</th>
               <th className={cn(th, "text-right")}>Paid %</th>
-              <th className={cn(th, "text-right")}>Revenue / install</th>
-              <th className={cn(th, "text-right")}>P(best) {metric === "paid" ? "paid" : "trial"}</th>
+              <th className={cn(th, "text-right")} title="Revenue per exposed install, refunds subtracted, with its 95% bootstrap interval">
+                Revenue / install*
+              </th>
+              <th className={cn(th, "text-right")} title="Refunded paid transactions: count (share of the paid transactions) and refunded share of the amount">
+                Refunds
+              </th>
+              <th className={cn(th, "text-right")}>P(best) {METRIC_SHORT[metric]}</th>
               <th className={th}>Lift vs control (95% interval)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {data.variants.map((v) => {
-              const p = v.probabilityBest[metric];
-              const lift = v.lift[metric];
+              const p = pBest(v);
+              const lift = v.lift[metric] ?? null;
               return (
                 <tr key={v.variant} className={cn(!data.enoughData && "[&_.prob]:text-zinc-400")}>
                   <td className={td}>
@@ -521,8 +555,25 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
                     {measured && <span className="block text-xs text-zinc-500">{fullNumber(v.paid)}</span>}
                   </td>
                   <td className={cn(td, "text-right tabular-nums")}>
-                    {v.revenuePerInstall === null ? "—" : money(v.revenuePerInstall, data.currency, { cents: true })}
-                    {measured && <span className="block text-xs text-zinc-500">{money(v.revenue, data.currency)}</span>}
+                    {v.revenuePerInstall === null ? "—" : perInstall(v.revenuePerInstall, data.currency)}
+                    {v.revenuePerInstallInterval && (
+                      <span className="block text-xs text-zinc-500">
+                        {perInstall(v.revenuePerInstallInterval.low, data.currency)} – {perInstall(v.revenuePerInstallInterval.high, data.currency)}
+                      </span>
+                    )}
+                    {measured && <span className="block text-xs text-zinc-500">{money(v.revenue, data.currency)} total</span>}
+                  </td>
+                  <td className={cn(td, "text-right tabular-nums")}>
+                    {!v.refunds ? (
+                      "—"
+                    ) : (
+                      <>
+                        {fullNumber(v.refunds.refunded)} <span className="text-xs text-zinc-500">of {fullNumber(v.refunds.transactions)}</span>
+                        <span className="block text-xs text-zinc-500">
+                          {v.refunds.countRate === null ? "—" : percent(v.refunds.countRate)} · {money(v.refunds.amount, data.currency)} ({v.refunds.amountRate === null ? "—" : percent(v.refunds.amountRate)})
+                        </span>
+                      </>
+                    )}
                   </td>
                   <td className={cn(td, "prob text-right font-medium tabular-nums", data.enoughData && v === leader && (p ?? 0) >= 0.95 && "text-emerald-700 dark:text-emerald-400")}>{p === null ? "—" : percent(p)}</td>
                   <td className={cn(td, "prob")}>{v.variant === control.variant ? <span className="text-xs text-zinc-500">control</span> : <LiftCell lift={lift} />}</td>
@@ -533,7 +584,8 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
         </Table>
         <div className="space-y-1 border-t border-zinc-100 px-5 py-3 text-xs text-zinc-500 dark:border-zinc-800">
           <p>
-            Rates have Beta posteriors (uniform prior); P(best) and the lift come from 20,000 seeded Monte Carlo draws. Revenue per install (refunds subtracted, {data.currency}) is a point estimate. Primary metric: {METRIC_LABEL[data.primaryMetric].toLowerCase()}.
+            * Revenue per exposed install with refunds already subtracted ({data.currency}, before Apple&rsquo;s commission); its interval, P(best) and lift come from a seeded bootstrap of 4,000 resamples. Rates have Beta posteriors (uniform prior); P(best) and the lift come from 20,000 seeded Monte
+            Carlo draws. Primary metric: {METRIC_LABEL[data.primaryMetric].toLowerCase()}.
           </p>
           {data.notes.map((n) => (
             <p key={n} className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
@@ -543,8 +595,70 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
           {data.exposureSource === "none" && <p>No exposures yet: RevflareKit 1.7+ sends experiment_exposure when the app reads one of the experiment&rsquo;s parameters.</p>}
         </div>
       </Card>
+      <RefundsByProduct results={data} />
       <DailyExposure results={data} />
     </>
+  );
+}
+
+/** Per variant, product and kind (trial → paid apart from paid at once and renewals): paid transactions, refunds, revenue. */
+function RefundsByProduct({ results }: { results: ExperimentResults }) {
+  const variants = results.variants.filter((v) => v.products?.length);
+  if (!variants.length) return null;
+  const cur = results.currency;
+  const rate = (x: number | null) => (x === null ? "—" : percent(x));
+  return (
+    <Card className="mt-5 overflow-hidden">
+      <CardHeader title="Refunds by product" description="Paid transactions begun after each install's first exposure, per product and kind; revenue after refunds." />
+      <Table>
+        <thead className="border-y border-zinc-100 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-800/30">
+          <tr>
+            <th className={th}>Variant</th>
+            <th className={th}>Product</th>
+            <th className={th}>Kind</th>
+            <th className={cn(th, "text-right")}>Paid</th>
+            <th className={cn(th, "text-right")}>Refunded</th>
+            <th className={cn(th, "text-right")}>Refund rate</th>
+            <th className={cn(th, "text-right")}>Refunded amount</th>
+            <th className={cn(th, "text-right")}>Amount rate</th>
+            <th className={cn(th, "text-right")}>Revenue</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+          {variants.flatMap((v) => [
+            ...v.products.map((p) => (
+              <tr key={`${v.variant}:${p.productId}:${p.kind}`}>
+                <td className={td}>
+                  <span className="font-mono text-xs text-zinc-400">{v.variant}</span> <span className="text-sm">{v.name}</span>
+                </td>
+                <td className={cn(td, "font-mono text-xs")}>{p.productId}</td>
+                <td className={cn(td, "text-sm")}>{KIND_LABEL[p.kind] ?? p.kind}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{fullNumber(p.transactions)}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{fullNumber(p.refunded)}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{rate(p.countRate)}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{money(p.amount, cur)}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{rate(p.amountRate)}</td>
+                <td className={cn(td, "text-right tabular-nums")}>{money(p.revenue, cur)}</td>
+              </tr>
+            )),
+            <tr key={`${v.variant}:all`} className="bg-zinc-50/60 font-medium dark:bg-zinc-800/30">
+              <td className={td}>
+                <span className="font-mono text-xs text-zinc-400">{v.variant}</span> <span className="text-sm">{v.name}</span>
+              </td>
+              <td className={cn(td, "text-sm")} colSpan={2}>
+                All products
+              </td>
+              <td className={cn(td, "text-right tabular-nums")}>{fullNumber(v.refunds.transactions)}</td>
+              <td className={cn(td, "text-right tabular-nums")}>{fullNumber(v.refunds.refunded)}</td>
+              <td className={cn(td, "text-right tabular-nums")}>{rate(v.refunds.countRate)}</td>
+              <td className={cn(td, "text-right tabular-nums")}>{money(v.refunds.amount, cur)}</td>
+              <td className={cn(td, "text-right tabular-nums")}>{rate(v.refunds.amountRate)}</td>
+              <td className={cn(td, "text-right tabular-nums")}>{money(v.revenue, cur)}</td>
+            </tr>,
+          ])}
+        </tbody>
+      </Table>
+    </Card>
   );
 }
 
