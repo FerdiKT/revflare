@@ -31,7 +31,7 @@ import type {
 import { customerAttribution, toAdsAttribution, TX_ATTRIBUTION_COLUMNS, TX_ATTRIBUTION_JOINS, TX_INSTALL_JOINS, TX_SOURCE_SQL, type AttributionCols } from "./ads-names";
 import { defineDbFunction, type Db } from "./db";
 import { computeGoals, PAST_VERSION_KEY } from "./goals";
-import { rebuildQueued } from "./rollup";
+import { computeDays, rebuildQueued, TX_COLUMNS, type SweepTx } from "./rollup";
 import { buildInsights, type AppDay } from "./overview-insights";
 import { keyEventActivity } from "./customer-activity";
 import { FxCache, addDays, dayOf, dayStart, keptShareSql, periodMonths, refundedShareSql } from "./money";
@@ -459,11 +459,14 @@ export async function chartLocal(db: Db, args: ChartArgs): Promise<Chart> {
   return chart;
 }
 
+/** Metrics read from the paid-period sweep (stocks and churn). */
+const SWEPT_METRICS = new Set<Metric>(["mrr", "mrr_proceeds", "arr", "active_subscriptions", "active_trials", "churn_rate", "churned_subscriptions", "arppu"]);
+
 async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: number, asOf: string | null): Promise<Series[]> {
   const metric = args.metric;
   const groups = new Map<string, { label: string; byDay: Map<string, DayRow> }>();
   // Per app, stocks after the last complete day carry its values (read from that day when it is before the range).
-  const carry = args.groupBy === "app" && asOf && METRIC_INFO[metric].kind === "stock" ? asOf : null;
+  const carry = asOf && METRIC_INFO[metric].kind === "stock" ? asOf : null;
   if (args.groupBy === "app") {
     const f = appClause(args, "d.app_id");
     const { results } = await db
@@ -481,7 +484,11 @@ async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: 
     // Country / product: flow metrics straight from transactions.
     const col = args.groupBy === "country" ? "t.country" : "t.product_id";
     const f = appClause(args, "t.app_id");
-    const { results } = await db
+    // Pure stocks need no flow sums.
+    const { results } =
+      METRIC_INFO[metric].kind === "stock"
+        ? { results: [] as (Partial<DayRow> & { k: string | null; day: string; pname: string | null })[] }
+        : await db
       .prepare(
         `SELECT ${col} AS k, strftime('%Y-%m-%d', t.purchased_at / 1000, 'unixepoch') AS day,
            SUM(t.gross_usd * ${KEPT}) AS gross_usd,
@@ -502,6 +509,38 @@ async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: 
       const label = args.groupBy === "country" ? (r.k ? `${flag(r.k)} ${COUNTRY_NAMES[r.k] ?? r.k}` : "Unknown") : (r.pname ?? key);
       if (!groups.has(key)) groups.set(key, { label, byDay: new Map() });
       groups.get(key)!.byDay.set(r.day, { ...emptyRow(r.day), ...r } as DayRow);
+    }
+    // Stocks (MRR, actives, trials) and churn have no per-product / per-country rows: the same sweep over paid periods
+    // as the rollup, run per group on the subscription periods that reach into the range, so the groups add up to the
+    // total.
+    if (SWEPT_METRICS.has(metric)) {
+      const from = carry && carry < args.from ? carry : args.from;
+      const field = args.groupBy === "country" ? "country" : "product_id";
+      const { results: txs } = await db
+        .prepare(
+          `SELECT ${TX_COLUMNS}, country, (SELECT p.name FROM products p WHERE p.app_id = t.app_id AND p.product_id = t.product_id) AS pname
+           FROM transactions t WHERE t.workspace_id = ? AND t.environment = 'Production' AND t.product_type = 'auto_renewable'
+             AND t.purchased_at < ? AND COALESCE(t.expires_at, t.purchased_at) > ?${f.sql} ORDER BY t.purchased_at`,
+        )
+        .bind(args.workspaceId, dayStart(args.to) + DAY, dayStart(from), ...f.params)
+        .all<SweepTx & { country: string | null; pname: string | null }>();
+      const byGroup = new Map<string, { label: string; txs: SweepTx[] }>();
+      for (const t of txs) {
+        const k = t[field];
+        const key = k ?? "unknown";
+        if (!byGroup.has(key)) byGroup.set(key, { label: args.groupBy === "country" ? (k ? `${flag(k)} ${COUNTRY_NAMES[k] ?? k}` : "Unknown") : (t.pname ?? key), txs: [] });
+        byGroup.get(key)!.txs.push(t);
+      }
+      const noCustomers = { seen: new Map<string, number>(), paid: new Map<string, number>() };
+      for (const [key, g] of byGroup) {
+        if (!groups.has(key)) groups.set(key, { label: g.label, byDay: new Map() });
+        const byDay = groups.get(key)!.byDay;
+        for (const d of computeDays(g.txs, new Map(), from, args.to, undefined, noCustomers, now())) {
+          const row = byDay.get(d.day) ?? emptyRow(d.day);
+          for (const c of [...STOCK_COLUMNS, "churned_subscriptions"] as const) (row[c] as number) = d[c];
+          byDay.set(d.day, row);
+        }
+      }
     }
   }
   const series: Series[] = [];
@@ -1035,7 +1074,7 @@ export interface FeedDay {
 }
 
 const SUB_SELECT = `SELECT s.id, s.app_id, a.name AS app_name, s.customer_id, s.original_transaction_id, s.product_id, p.name AS product_name,
-  s.status, s.auto_renew, s.started_at, s.expires_at, s.period, s.mrr_usd, s.country, s.renewal_price_usd, s.cancel_reason
+  s.status, s.auto_renew, s.started_at, s.expires_at, s.period, p.period AS product_period, s.mrr_usd, s.country, s.renewal_price_usd, s.cancel_reason
   FROM subscriptions s JOIN apps a ON a.id = s.app_id LEFT JOIN products p ON p.app_id = s.app_id AND p.product_id = s.product_id`;
 
 type SubRow = {
@@ -1051,15 +1090,21 @@ type SubRow = {
   started_at: number;
   expires_at: number | null;
   period: string | null;
+  /** The product's billing period (a subscription still in its trial has the trial's period, e.g. P3D). */
+  product_period: string | null;
   mrr_usd: number;
   country: string | null;
   renewal_price_usd: number | null;
   cancel_reason: string | null;
 };
 
-/** MRR of a subscription; billing retry has none of its own, value it at what it was paying. */
-const subMrr = (r: SubRow) =>
-  r.mrr_usd || (r.status === "billing_retry" && r.renewal_price_usd ? r.renewal_price_usd / (periodMonths(r.period) ?? 1) : 0);
+/**
+ * MRR of a subscription. Billing retry and grace have none of their own (or not yet, after a trial): value them at the
+ * renewal price over the product's billing period, never the trial's.
+ */
+export const subMrr = (r: Pick<SubRow, "mrr_usd" | "status" | "renewal_price_usd" | "period" | "product_period">) =>
+  r.mrr_usd ||
+  ((r.status === "billing_retry" || r.status === "grace") && r.renewal_price_usd ? r.renewal_price_usd / (periodMonths(r.product_period ?? r.period) ?? 1) : 0);
 
 const toSubscription = (r: SubRow, rate: number): Subscription => ({
   id: r.id,
@@ -1265,36 +1310,28 @@ export const customer = defineDbFunction("customer", async (db, args: Scope & { 
 export async function atRiskLocal(db: Db, args: Scope & { limit?: number }): Promise<AtRisk> {
   const { currency, rate } = await workspaceCurrency(db, args);
   const f = appClause(args, "s.app_id");
-  const base = `s.workspace_id = ? AND s.environment = 'Production'${f.sql}`;
-  const { results: groups } = await db
+  const base = `s.workspace_id = ? AND s.environment = 'Production'${f.sql} AND (s.status IN ('billing_retry', 'grace') OR (s.status = 'active' AND s.auto_renew = 0))`;
+  // Totals from the same per-subscription value as the rows (subMrr): few rows, summed here.
+  const { results: all } = await db
     .prepare(
-      `SELECT CASE WHEN s.status IN ('billing_retry', 'grace') THEN s.status ELSE 'cancelled' END AS reason,
-         COUNT(*) AS n, SUM(CASE WHEN s.mrr_usd > 0 THEN s.mrr_usd ELSE COALESCE(s.renewal_price_usd, 0) / 1 END) AS mrr
-       FROM subscriptions s WHERE ${base} AND (s.status IN ('billing_retry', 'grace') OR (s.status = 'active' AND s.auto_renew = 0))
-       GROUP BY reason`,
+      `SELECT s.status, s.period, s.mrr_usd, s.renewal_price_usd,
+         CASE WHEN s.mrr_usd = 0 AND s.status IN ('billing_retry', 'grace') THEN (SELECT p.period FROM products p WHERE p.app_id = s.app_id AND p.product_id = s.product_id) END AS product_period
+       FROM subscriptions s WHERE ${base}`,
     )
     .bind(args.workspaceId, ...f.params)
-    .all<{ reason: "billing_retry" | "grace" | "cancelled"; n: number; mrr: number }>();
-  // Billing retry has no MRR of its own (it is not paying): value it at what it was paying.
-  const { results: retryValue } = await db
-    .prepare(
-      `SELECT s.status, SUM(COALESCE(s.renewal_price_usd, 0) / COALESCE(CASE s.period WHEN 'P1W' THEN 0.23 WHEN 'P1M' THEN 1 WHEN 'P2M' THEN 2 WHEN 'P3M' THEN 3 WHEN 'P6M' THEN 6 WHEN 'P1Y' THEN 12 END, 1)) AS mrr
-       FROM subscriptions s WHERE ${base} AND s.status = 'billing_retry' GROUP BY s.status`,
-    )
-    .bind(args.workspaceId, ...f.params)
-    .all<{ status: string; mrr: number }>();
+    .all<Pick<SubRow, "status" | "period" | "product_period" | "mrr_usd" | "renewal_price_usd">>();
   const labels = { billing_retry: "Billing issue (retrying)", grace: "Grace period", cancelled: "Auto-renew turned off" };
-  const out = groups.map((g) => ({
-    reason: g.reason,
-    label: labels[g.reason],
-    subscriptions: g.n,
-    mrr: (g.reason === "billing_retry" ? (retryValue[0]?.mrr ?? 0) : g.mrr) * rate,
-  }));
+  const sums = new Map<keyof typeof labels, { n: number; mrr: number }>();
+  for (const r of all) {
+    const reason = r.status === "billing_retry" || r.status === "grace" ? r.status : "cancelled";
+    const g = sums.get(reason) ?? { n: 0, mrr: 0 };
+    g.n += 1;
+    g.mrr += subMrr(r);
+    sums.set(reason, g);
+  }
+  const out = [...sums].sort(([a], [b]) => (a < b ? -1 : 1)).map(([reason, g]) => ({ reason, label: labels[reason], subscriptions: g.n, mrr: g.mrr * rate }));
   const { results: items } = await db
-    .prepare(
-      `${SUB_SELECT} WHERE ${base.replace(/s\.workspace_id/, "s.workspace_id")} AND (s.status IN ('billing_retry', 'grace') OR (s.status = 'active' AND s.auto_renew = 0))
-       ORDER BY s.expires_at LIMIT ?`,
-    )
+    .prepare(`${SUB_SELECT} WHERE ${base} ORDER BY s.expires_at LIMIT ?`)
     .bind(args.workspaceId, ...f.params, args.limit ?? 100)
     .all<SubRow>();
   return { currency, mrr: out.reduce((s, g) => s + g.mrr, 0), groups: out, items: items.map((s) => toSubscription(s, rate)) };

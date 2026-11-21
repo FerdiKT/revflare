@@ -541,7 +541,8 @@ class Ledger {
     // A paused Play subscription keeps auto-renew on (it resumes by itself).
     if ((status === "expired" && !(play && play.autoRenew)) || status === "refunded" || status === "revoked") autoRenew = 0;
 
-    const period = lastPaid?.period ?? latest.period ?? (await this.productPeriod(latest.product_id));
+    // A subscription that has not paid yet (trial, billing retry after a trial) renews at the product's period, not the trial's.
+    const period = lastPaid?.period ?? (latest.kind === "trial" ? await this.productPeriod(latest.product_id) : null) ?? latest.period ?? (await this.productPeriod(latest.product_id));
     const paying = status === "active" || status === "grace";
     const mrr = paying && lastPaid ? monthly(lastPaid.gross_usd, period) : 0;
     let renewalPriceUsd: number | null = null;

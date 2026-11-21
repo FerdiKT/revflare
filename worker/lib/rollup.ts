@@ -11,8 +11,9 @@ import { addDays, dayOf, dayStart, estimateProceeds, monthly, refundedShare } fr
 import { now } from "./util";
 
 const DAY = 86_400_000;
+type Tx = SweepTx;
 
-interface Tx {
+export interface SweepTx {
   id: string;
   product_id: string;
   customer_id: string | null;
