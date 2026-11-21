@@ -518,20 +518,23 @@ async function groupedSeries(db: Db, args: ChartArgs, interval: Interval, rate: 
       const field = args.groupBy === "country" ? "country" : "product_id";
       const { results: txs } = await db
         .prepare(
-          `SELECT ${TX_COLUMNS}, app_id, country, (SELECT p.name FROM products p WHERE p.app_id = t.app_id AND p.product_id = t.product_id) AS pname
+          `SELECT ${TX_COLUMNS}, app_id, country, (SELECT p.name FROM products p WHERE p.app_id = t.app_id AND p.product_id = t.product_id) AS pname,
+             CASE WHEN t.purchased_at < ? THEN (SELECT MIN(n.purchased_at) FROM transactions n WHERE n.app_id = t.app_id AND n.original_transaction_id = t.original_transaction_id
+               AND n.purchased_at > t.purchased_at AND n.purchased_at < ? AND n.environment = 'Production' AND n.product_type = 'auto_renewable') END AS next_start
            FROM transactions t WHERE t.workspace_id = ? AND t.environment = 'Production' AND t.product_type = 'auto_renewable'
              AND t.purchased_at < ? AND COALESCE(t.expires_at, t.purchased_at) > ?${f.sql} ORDER BY t.purchased_at`,
         )
-        .bind(args.workspaceId, dayStart(args.to) + DAY, dayStart(from), ...f.params)
-        .all<SweepTx & { app_id: string; country: string | null; pname: string | null }>();
-      // One subscription can change product (crossgrade): as in the rollup's sweep, a period ends where the next period
-      // of the same subscription starts, whichever group that one is in.
+        .bind(dayStart(from), dayStart(from), args.workspaceId, dayStart(args.to) + DAY, dayStart(from), ...f.params)
+        .all<SweepTx & { app_id: string; country: string | null; pname: string | null; next_start: number | null }>();
+      // As in the rollup's sweep, a period ends where the next period of the same subscription starts (a crossgrade to
+      // another group, a shorter period inside a longer one), even when that next period ended before the range
+      // (next_start: periods that started before the range).
       const nextStart = new Map<string, number>();
       for (let i = txs.length - 1; i >= 0; i--) {
         const t = txs[i];
         const k = `${t.app_id}:${t.original_transaction_id}`;
-        const next = nextStart.get(k);
-        if (next !== undefined && t.expires_at !== null && next < t.expires_at && next > t.purchased_at) txs[i] = { ...t, expires_at: next };
+        const next = Math.min(nextStart.get(k) ?? Infinity, t.next_start ?? Infinity);
+        if (t.expires_at !== null && next < t.expires_at && next > t.purchased_at) txs[i] = { ...t, expires_at: next };
         nextStart.set(k, t.purchased_at);
       }
       const byGroup = new Map<string, { label: string; txs: SweepTx[] }>();
