@@ -611,6 +611,8 @@ const pending = (r: ExperimentRow, currency: string, at: number, reason: string)
   return { ...notStarted(r, currency, at), from: w?.from ?? null, to: w?.to ?? null, daysRunning: w ? Math.round(((w.to - w.from) / DAY) * 10) / 10 : 0, reasons: [reason] };
 };
 
+const KEPT_FINAL = "The exposed installs can no longer be read (Analytics Engine keeps 3 months, key events their retention): these final results were kept as computed earlier.";
+
 const BUDGET_USED = "Today's database budget for background work is used up (Cloudflare Free plan): results are computed again after 00:00 UTC.";
 
 export type ResultsMode =
@@ -647,7 +649,8 @@ export const computeExperimentResults = defineDbFunction(
     const stored = storedOf(r);
     if (args.mode === "missing" && stored && (r.frozen || r.status === "running")) return { status: 200, results: stored };
     if (args.mode === "refresh") {
-      if (r.frozen && stored) return { status: 409, error: "The experiment has ended: its results are final." };
+      // Final results can be recomputed too (same window: refunds that came later, or a newer Revflare): see
+      // computeResults, which keeps them when the exposures can no longer be read.
       const wait = r.results_at === null ? 0 : r.results_at + REFRESH_INTERVAL_MS - args.at;
       if (wait > 0 && stored)
         return { status: 429, error: `Results were computed less than an hour ago: refresh again in ${Math.ceil(wait / 60_000)} min.`, retryAfter: Math.ceil(wait / 1000) };
@@ -826,6 +829,11 @@ async function computeResults(db: Db, env: Env, r: ExperimentRow, currency: stri
     if (p >= 0.95) confident = { variant: best.variant, probability: p };
   }
   const frozen = r.status !== "running";
+  // Recomputing final results once the install lists are gone (Analytics Engine retention, key events expired) would
+  // replace measured conversions with exposure counts only: keep the stored ones.
+  const previous = r.frozen ? storedOf(r) : null;
+  if (previous && previous.exposureSource === "events" && !lists)
+    return { ...previous, notes: [...previous.notes.filter((n) => n !== KEPT_FINAL), KEPT_FINAL] };
   const results: ExperimentResults = {
     experimentId: r.id,
     status: r.status,

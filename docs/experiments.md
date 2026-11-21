@@ -149,6 +149,8 @@ variant and database reads per exposed install, so they are not computed per req
 - **`GET …/results`** computes only when nothing is stored yet, or once more after the stop (that computation is final:
   `frozen`, the window ends at the stop, kept for good).
 - **`POST …/results/refresh`** recomputes now, at most once an hour per experiment (`429` with `retryAfter` before).
+  Final results can be recomputed too, over the same window (refunds that came later, or a newer Revflare); when the
+  exposed installs can no longer be read the stored final results stay, with a note.
 
 Every computation runs inside the database object (the Analytics Engine queries too, so the install lists never cross
 an RPC boundary) and is metered against the daily background budget (`worker/lib/budget.ts`, like backfills): once it

@@ -499,11 +499,16 @@ function Results({ appId, e }: { appId: string; e: Experiment }) {
           }
           action={
             <div className="flex items-center gap-2">
-              {!data.frozen && (
-                <Button size="sm" variant="ghost" icon={<RefreshCw className="size-3.5" />} loading={refreshing} onClick={refresh} title="Recompute now (at most once an hour)">
-                  Refresh
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<RefreshCw className="size-3.5" />}
+                loading={refreshing}
+                onClick={refresh}
+                title={data.frozen ? "Recompute the final results over the same window (late refunds; at most once an hour)" : "Recompute now (at most once an hour)"}
+              >
+                Refresh
+              </Button>
               <Segmented
                 size="sm"
                 label="Probability metric"

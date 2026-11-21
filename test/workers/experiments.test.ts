@@ -372,7 +372,25 @@ describe("experiments", { timeout: 120_000 }, () => {
     expect(final.json.variants.map((v: { paid: number }) => v.paid)).toEqual([3, 13]);
     await dbExec("UPDATE experiments SET results_at = 0 WHERE id = ?", [exp.id]);
     expect((await call(client, `${base}/${exp.id}/results`)).json.generatedAt).toBe(final.json.generatedAt);
-    expect((await call(client, `${base}/${exp.id}/results/refresh`, { method: "POST" })).status).toBe(409);
+    // Final results can be recomputed (same window, still frozen), at most once an hour.
+    await dbExec("UPDATE experiments SET results_at = ? WHERE id = ?", [Date.now() - 10 * 60_000, exp.id]);
+    expect((await call(client, `${base}/${exp.id}/results/refresh`, { method: "POST" })).status).toBe(429);
+    await dbExec("UPDATE experiments SET results_at = ? WHERE id = ?", [Date.now() - 2 * H, exp.id]);
+    resetWaeCache();
+    interceptSql(2, answer);
+    const recomputed = await call(client, `${base}/${exp.id}/results/refresh`, { method: "POST" });
+    fetchMock.assertNoPendingInterceptors();
+    expect(recomputed.status, recomputed.text).toBe(200);
+    expect(recomputed.json).toMatchObject({ status: "stopped", frozen: true, to: stopAt });
+    expect(recomputed.json.variants.map((v: { paid: number }) => v.paid)).toEqual([3, 13]);
+    // Once the install lists can no longer be read, the stored final results stay.
+    await dbExec("UPDATE experiments SET results_at = ?, started_at = ?, stopped_at = ? WHERE id = ?", [Date.now() - 2 * H, start - 100 * DAY, start - 91 * DAY, exp.id]);
+    await dbExec("DELETE FROM app_events WHERE app_id = ?", [id]);
+    const kept = await call(client, `${base}/${exp.id}/results/refresh`, { method: "POST" });
+    expect(kept.status, kept.text).toBe(200);
+    expect(kept.json.variants.map((v: { paid: number }) => v.paid)).toEqual([3, 13]);
+    expect(kept.json.notes.at(-1)).toContain("can no longer be read");
+    await dbExec("UPDATE experiments SET started_at = ?, stopped_at = ? WHERE id = ?", [start, stopAt, exp.id]);
     // Still one alert (raised only while running).
     expect((await call(client, "/api/v1/alerts")).json.items.filter((x: { kind: string }) => x.kind === "experiment_result")).toHaveLength(1);
     expect((await call(client, `${base}/${exp.id}/archive`, { method: "POST" })).status).toBe(200);
