@@ -1177,6 +1177,168 @@ struct Forecast: Codable, Sendable {
     var points: [Row]
 }
 
+/// Revenue projection (`GET /projection`, docs/projection.md): proceeds (after refunds and commission) in `currency`.
+struct Projection: Codable, Sendable {
+    /// Expected value and its 90% band.
+    struct Band: Codable, Hashable, Sendable {
+        var expected: Double
+        var low: Double
+        var high: Double
+    }
+
+    /// One day or week (`date` = its first day; MRR at its end).
+    struct Point: Codable, Hashable, Sendable {
+        var date: String
+        var renewals: Band
+        var newSubscribers: Double
+        var oneTime: Double
+        var total: Band
+        var renewalsGross: Double
+        var totalGross: Double
+        var mrr: Band
+        var mrrWithNew: Band
+    }
+
+    struct Totals: Codable, Hashable, Sendable {
+        struct Components: Codable, Hashable, Sendable {
+            var renewals: Double
+            var newSubscribers: Double
+            var oneTime: Double
+        }
+        var existing: Band
+        var withNew: Band
+        var existingGross: Double
+        var withNewGross: Double
+        var components: Components
+        var mrr: Band
+        var mrrWithNew: Band
+    }
+
+    struct Horizons<T: Codable & Hashable & Sendable>: Codable, Hashable, Sendable {
+        var d30: T
+        var d90: T
+        var d365: T
+        subscript(days: Int) -> T { days <= 30 ? d30 : days <= 90 ? d90 : d365 }
+    }
+
+    struct Summary: Codable, Hashable, Sendable {
+        var next30: Double
+        var next30Previous: Double?
+        var next30Change: Double?
+        var mrrNow: Double
+    }
+
+    struct Segment: Codable, Hashable, Sendable, Identifiable {
+        var appId: String
+        var appName: String?
+        var period: String
+        /// trial | intro | r1 | r2 | r3
+        var stage: String
+        var observed: Int
+        var renewed: Int
+        var observedRate: Double?
+        var rate: Double
+        var low: Double
+        var high: Double
+        var lowData: Bool
+        /// app | portfolio | default
+        var source: String
+        var id: String { "\(appId):\(period):\(stage)" }
+    }
+
+    struct Renewal: Codable, Hashable, Sendable {
+        var appId: String
+        var appName: String?
+        var productId: String
+        var period: String
+        var date: Double
+        var price: Double
+        var expectedProceeds: Double
+        var probability: Double
+        /// on | off | retry | grace
+        var status: String
+        var stage: String
+    }
+
+    struct Upcoming: Codable, Hashable, Sendable {
+        var count: Int
+        var price: Double
+        var expectedProceeds: Double
+        var items: [Renewal]
+    }
+
+    struct Backtest: Codable, Hashable, Sendable, Identifiable {
+        struct Side: Codable, Hashable, Sendable {
+            var predicted: Band
+            var actual: Double
+            var error: Double?
+            var inBand: Bool
+        }
+        var asOf: String
+        var days: Int
+        var existing: Side
+        var withNew: Side
+        var id: String { asOf }
+    }
+
+    struct BacktestError: Codable, Hashable, Sendable {
+        var withNew: Double?
+        var existing: Double?
+    }
+
+    struct AppTotals: Codable, Hashable, Sendable {
+        var existing: Band
+        var withNew: Band
+    }
+
+    struct AppRow: Codable, Hashable, Sendable, Identifiable {
+        var appId: String
+        var name: String
+        var mrrNow: Double
+        var totals: Horizons<AppTotals>
+        var id: String { appId }
+    }
+
+    struct Inputs: Codable, Hashable, Sendable {
+        var activeSubscriptions: Int
+        var trials: Int
+        var autoRenewOff: Int
+        var billingRetry: Int
+        var grace: Int
+        var skipped: Int
+        var newStartsPerDay: Double
+        var oneTimePerDay: Double
+    }
+
+    var currency: String
+    var from: String
+    var days: Int
+    var generatedAt: Double
+    var summary: Summary
+    var totals: Horizons<Totals>
+    var daily: [Point]
+    var weekly: [Point]
+    var apps: [AppRow]
+    var segments: [Segment]
+    var upcoming: Upcoming
+    var backtest: [Backtest]
+    var backtestError: BacktestError
+    var inputs: Inputs
+    var notes: [String]
+}
+
+/// `GET /projection/summary`: the overview line.
+struct ProjectionSummary: Codable, Hashable, Sendable {
+    var currency: String
+    var generatedAt: Double
+    var next30: Double
+    var next30Band: Projection.Band
+    var next30Previous: Double?
+    var next30Change: Double?
+    var mrrNow: Double
+    var backtestError: Projection.BacktestError
+}
+
 struct RFAlert: Codable, Hashable, Sendable, Identifiable {
     var id: String
     var appId: String?

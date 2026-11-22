@@ -130,6 +130,8 @@ struct OverviewContent: View {
     var scopedToApp: String?
     var updatedAt: Date?
     var offline: Bool
+    /// The projection's overview line (`GET /projection/summary`): computed once a day on the server, cheap to read.
+    @State private var projection: ProjectionSummary?
 
     private var net: Bool { model.showProceeds }
 
@@ -159,14 +161,27 @@ struct OverviewContent: View {
                     }
                 }
                 .disabled(scopedToApp != nil)
-                NavigationLink(value: Route.forecast) {
+                NavigationLink(value: scopedToApp.map { Route.projection(appId: $0) } ?? Route.forecast) {
                     MiniStatCard(title: "Next 30 days", systemImage: "calendar.badge.clock", tint: .blue) {
-                        MoneyText(value: o.forecast30, currency: o.currency, compact: true)
+                        // The projection's line (renewals + new subscribers + one-time, proceeds); the quick renewal
+                        // forecast until it has loaded.
+                        if let s = projection, s.currency == o.currency {
+                            MoneyText(value: s.next30, currency: o.currency, compact: true)
+                        } else {
+                            MoneyText(value: o.forecast30, currency: o.currency, compact: true)
+                        }
                     } caption: {
-                        Text("Expected renewals")
+                        if let s = projection, s.currency == o.currency {
+                            if let change = s.next30Change {
+                                Text("\(change >= 0 ? "+" : "−")\(Fmt.money(abs(change), o.currency, compact: true, hide: model.privacyMode)) since yesterday")
+                            } else {
+                                Text("Expected proceeds")
+                            }
+                        } else {
+                            Text("Expected renewals")
+                        }
                     }
                 }
-                .disabled(scopedToApp != nil)
             }
             .buttonStyle(.plain)
 
@@ -179,6 +194,31 @@ struct OverviewContent: View {
             if !o.alerts.filter({ $0.resolvedAt == nil }).isEmpty {
                 AlertsCard(alerts: o.alerts.filter { $0.resolvedAt == nil })
             }
+        }
+        .task(id: ProjectionKey(apps: scopedToApp.map { [$0] } ?? model.overviewApps, day: overview.today.date, ws: model.workspace?.id)) {
+            await loadProjection()
+        }
+    }
+
+    private struct ProjectionKey: Equatable {
+        var apps: Set<String>
+        var day: String
+        var ws: String?
+    }
+
+    /// Once per filter and day (the server computes the projection once a day); a failure keeps the renewal forecast.
+    private func loadProjection() async {
+        guard let client = model.client else { return }
+        let apps = scopedToApp.map { [$0] } ?? model.overviewApps
+        let key = ResponseCache.key("projection-summary", appsParam(apps) ?? "all")
+        struct Cached: Codable { var value: ProjectionSummary; var day: String }
+        if let c = ResponseCache.load(Cached.self, key: key), c.day == overview.today.date {
+            projection = c.value
+            return
+        }
+        if let s = try? await client.projectionSummary(apps: apps) {
+            projection = s
+            ResponseCache.store(Cached(value: s, day: overview.today.date), key: key)
         }
     }
 

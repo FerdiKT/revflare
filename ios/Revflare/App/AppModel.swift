@@ -19,7 +19,10 @@ enum Route: Hashable {
     /// One goal's detail (a goal push's `goalId`, `revflare://goals/<id>`).
     case goal(id: String)
     case atRisk
+    /// Revenue projection of the overview's app filter (`revflare://forecast`).
     case forecast
+    /// Revenue projection of one app.
+    case projection(appId: String)
     case events(appId: String)
     case funnels(appId: String)
     case funnelReport(appId: String, funnel: Funnel)

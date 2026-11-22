@@ -1,7 +1,8 @@
 # Revenue projection
 
 Expected proceeds and MRR for the next 30 / 90 / 365 days, per app or for every app together: web app **Projection**
-(`/forecast`), `GET /api/v1/projection` ([api.md](api.md)), `revflare projection`, MCP `get_projection`. Code: the model
+(`/forecast`), the iOS app (Overview → **Next 30 days**, also on an app's page), `GET /api/v1/projection`
+([api.md](api.md)), `revflare projection`, MCP `get_projection`. Code: the model
 in `worker/lib/projection-model.ts` (pure, unit tested in `test/projection.test.ts`), loading and serving in
 `worker/lib/projection.ts`.
 
