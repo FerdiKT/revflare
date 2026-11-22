@@ -180,6 +180,13 @@ describe("Google Play", () => {
     expect(await sub(O1)).toMatchObject({ status: "active", auto_renew: 1 });
 
     // The customer page reads the Play notifications as history; the cancellation date is known.
+    // The customer view also reads the installs' recent events from Analytics Engine: answer it (no events), or the
+    // unmatched mocked request surfaces as an unhandled rejection.
+    fetchMock
+      .get("https://api.cloudflare.com")
+      .intercept({ path: `/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`, method: "POST" })
+      .reply(200, JSON.stringify({ meta: [], data: [], rows: 0 }))
+      .persist();
     const cust = await call(owner, `/api/v1/customers/${(await tx(O1)).customer_id}`);
     expect(cust.status).toBe(200);
     expect(cust.json.transactions.every((t: any) => t.store === "play_store")).toBe(true);
