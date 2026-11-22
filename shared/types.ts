@@ -712,6 +712,138 @@ export interface Forecast {
   points: { date: string; due: number; expected: number }[];
 }
 
+// Revenue projection (GET /projection, docs/projection.md) ---------------------------------------------------------
+
+/** Expected value with its 90% band (5th / 95th percentile of seeded draws of the measured rates and volumes). */
+export interface ProjectionBand {
+  expected: number;
+  low: number;
+  high: number;
+}
+
+export type ProjectionHorizon = "d30" | "d90" | "d365";
+export const PROJECTION_HORIZONS: Record<ProjectionHorizon, number> = { d30: 30, d90: 90, d365: 365 };
+/** Stage of a subscription's current period, i.e. what its next payment is: trial conversion, the full price after a paid intro offer, the 1st / 2nd / 3rd-and-later renewal. */
+export type ProjectionStage = "trial" | "intro" | "r1" | "r2" | "r3";
+
+/** One day (or week: `date` = its first day, sums over its days, MRR at its end). Money in `currency`; proceeds unless named gross. */
+export interface ProjectionPoint {
+  date: string;
+  /** Payments of the subscriptions active today (renewals, trial conversions). */
+  renewals: ProjectionBand;
+  /** Subscriptions started from now on (the last 28 days' starts a day). */
+  newSubscribers: number;
+  /** One-time purchases (the last 28 days' daily average). */
+  oneTime: number;
+  /** renewals + newSubscribers + oneTime. */
+  total: ProjectionBand;
+  renewalsGross: number;
+  totalGross: number;
+  /** MRR (gross) at the end of the day: today's subscriptions only, and with new subscribers. */
+  mrr: ProjectionBand;
+  mrrWithNew: ProjectionBand;
+}
+
+export interface ProjectionTotals {
+  /** Existing subscriptions only. */
+  existing: ProjectionBand;
+  /** With new subscribers and one-time purchases. */
+  withNew: ProjectionBand;
+  existingGross: number;
+  withNewGross: number;
+  components: { renewals: number; newSubscribers: number; oneTime: number };
+  /** MRR at the end of the horizon. */
+  mrr: ProjectionBand;
+  mrrWithNew: ProjectionBand;
+}
+
+export interface ProjectionSegment {
+  appId: string;
+  appName: string | null;
+  /** Billing period (P1W, P1M, P1Y...). */
+  period: string;
+  stage: ProjectionStage;
+  /** Periods that ended in the lookback (90 days weekly, 180 monthly, 400 longer) and how many paid again. */
+  observed: number;
+  renewed: number;
+  observedRate: number | null;
+  /** Rate used (posterior mean) and its 95% interval. */
+  rate: number;
+  low: number;
+  high: number;
+  /** Fewer than 30 observed renewals: the rate leans on the portfolio (all apps, same period and stage). */
+  lowData: boolean;
+  /** Where most of the rate comes from: the app's own history, the portfolio's, or the fixed default. */
+  source: "app" | "portfolio" | "default";
+}
+
+export interface ProjectionRenewal {
+  appId: string;
+  appName: string | null;
+  productId: string;
+  period: string;
+  /** Renewal date (ms). */
+  date: number;
+  /** Full price (gross) and expected proceeds (× probability, refunds, commission). */
+  price: number;
+  expectedProceeds: number;
+  probability: number;
+  /** on: renews automatically; off: auto-renew turned off; retry: billing retry; grace: billing grace period. */
+  status: "on" | "off" | "retry" | "grace";
+  stage: ProjectionStage;
+}
+
+export interface ProjectionBacktest {
+  /** The model run as of this UTC day (only what was known then), over the `days` until today. */
+  asOf: string;
+  days: number;
+  existing: { predicted: ProjectionBand; actual: number; error: number | null; inBand: boolean };
+  withNew: { predicted: ProjectionBand; actual: number; error: number | null; inBand: boolean };
+}
+
+export interface ProjectionApp {
+  appId: string;
+  name: string;
+  mrrNow: number;
+  totals: Record<ProjectionHorizon, { existing: ProjectionBand; withNew: ProjectionBand }>;
+}
+
+/** GET /projection. */
+export interface Projection {
+  currency: string;
+  /** Day 0 (UTC). */
+  from: string;
+  days: number;
+  generatedAt: number;
+  summary: {
+    /** Expected proceeds over the next 30 days with new subscribers (the overview line), and as computed yesterday. */
+    next30: number;
+    next30Previous: number | null;
+    next30Change: number | null;
+    mrrNow: number;
+  };
+  totals: Record<ProjectionHorizon, ProjectionTotals>;
+  daily: ProjectionPoint[];
+  weekly: ProjectionPoint[];
+  apps: ProjectionApp[];
+  segments: ProjectionSegment[];
+  upcoming: { count: number; price: number; expectedProceeds: number; items: ProjectionRenewal[] };
+  backtest: ProjectionBacktest[];
+  /** Mean absolute error of the backtests (with new subscribers, existing only); null without a backtest. */
+  backtestError: { withNew: number | null; existing: number | null };
+  inputs: { activeSubscriptions: number; trials: number; autoRenewOff: number; billingRetry: number; grace: number; skipped: number; newStartsPerDay: number; oneTimePerDay: number };
+  assumptions: {
+    proceedsShare: { appId: string; firstYear: number; afterYear: number; afterYearAssumed: boolean }[];
+    refundShare: { appId: string; share: number }[];
+    /** Next-payment weights of subscriptions with auto-renew off / in billing retry / in grace. */
+    weights: { autoRenewOff: number; billingRetry: number; grace: number };
+  };
+  notes: string[];
+}
+
+/** GET /projection/summary: the overview line. */
+export type ProjectionSummary = Projection["summary"] & { currency: string; generatedAt: number; next30Band: ProjectionBand; backtestError: Projection["backtestError"] };
+
 export interface Cohorts {
   currency: string;
   /** Month of the first payment. */

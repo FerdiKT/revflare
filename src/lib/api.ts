@@ -28,6 +28,7 @@ import type {
   Customer,
   Device,
   Forecast,
+  Projection,
   GoalInput,
   GoalProgress,
   Interval,
@@ -423,6 +424,7 @@ export const api = {
   setRefundConsent: (id: string, consent: boolean) => put<{ id: string; refundDataConsent: boolean }>(`/customers/${encodeURIComponent(id)}/refund-consent`, { consent }),
   atRisk: (s: Scope, limit = 200) => get<AtRisk>(`/at-risk${qs({ apps: s.apps, limit })}`),
   forecast: (s: Scope, days = 30) => get<Forecast>(`/forecast${qs({ apps: s.apps, days })}`),
+  projection: (s: Scope) => get<Projection>(`/projection${qs({ apps: s.apps })}`),
   cohorts: (s: Scope, months = 12) => get<Cohorts>(`/cohorts${qs({ apps: s.apps, months })}`),
   attributed: (s: Scope & { includeTest?: boolean }) => get<AttributedRevenue>(`/revenue/attributed${qs({ ...s, includeTest: s.includeTest ? "true" : undefined })}`),
   adsNames: {

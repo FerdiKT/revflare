@@ -19,6 +19,7 @@ import { experiments } from "./commands/experiments.js";
 import { events, funnels } from "./commands/events.js";
 import { alerts, alertsResolve, goals, goalsAdd, goalsArchive, goalsEdit, goalsList, goalsRemove, goalsRemoveAlias, goalsReorder, goalsShow, jobs, jobsCancel, jobsShow } from "./commands/manage.js";
 import { atRisk, breakdown, chart, cohorts, forecast, insights, mrrMovement, overview, revenueDaily } from "./commands/metrics.js";
+import { projection } from "./commands/projection.js";
 import { importRevenuecatCharts } from "./commands/rccharts.js";
 import { skillInstall } from "./commands/skill.js";
 import { customer, transactions } from "./commands/transactions.js";
@@ -49,6 +50,7 @@ export const COMMANDS: Command[] = [
   customer,
   atRisk,
   forecast,
+  projection,
   cohorts,
   attribution,
   ltv,
@@ -102,7 +104,7 @@ const GROUPS: Array<[string, string[]]> = [
   ["Revenue", ["overview", "insights", "apps", "app", "chart", "breakdown", "mrr-movement", "revenue-daily"]],
   ["Google Play (Android)", ["google-play"]],
   ["Polar (web)", ["polar"]],
-  ["Customers & sales", ["transactions", "customer", "at-risk", "forecast", "cohorts"]],
+  ["Customers & sales", ["transactions", "customer", "at-risk", "forecast", "projection", "cohorts"]],
   ["Apple Ads", ["attribution", "ltv", "sdk-key"]],
   ["Meta Ads", ["meta"]],
   ["Paywalls & remote config", ["offerings", "entitlements", "config", "experiments"]],

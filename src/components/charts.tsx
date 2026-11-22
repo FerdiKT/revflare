@@ -125,6 +125,15 @@ function axisLabel(date: string, interval: Interval, first: boolean): string {
   return DAY_FMT.format(d);
 }
 
+/** A range per bucket (e.g. a projection's 90% band): a shaded area behind lines, a whisker over columns. */
+export interface ChartBand {
+  key: string;
+  label: string;
+  color: string;
+  low: number[];
+  high: number[];
+}
+
 export interface ChartSeries {
   key: string;
   label: string;
@@ -155,6 +164,7 @@ export function TimeChart({
   totalLabel = "Total",
   area,
   compact,
+  bands = [],
 }: {
   dates: string[];
   interval: Interval;
@@ -176,6 +186,7 @@ export function TimeChart({
   area?: boolean;
   /** Smaller paddings and fewer ticks (cards). */
   compact?: boolean;
+  bands?: ChartBand[];
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const gradient = useId();
@@ -206,6 +217,10 @@ export function TimeChart({
     for (const s of lines) {
       hi = Math.max(hi, s.values[i] ?? 0);
       lo = Math.min(lo, s.values[i] ?? 0);
+    }
+    for (const b of bands) {
+      hi = Math.max(hi, b.high[i] ?? 0);
+      lo = Math.min(lo, b.low[i] ?? 0);
     }
   }
   const ticks = niceTicks(lo, hi, compact ? 3 : 4);
@@ -286,6 +301,21 @@ export function TimeChart({
               </text>
             </g>
           ))}
+          {/* Bands: shaded area (lines) or whiskers (columns), behind the marks. */}
+          {bands.map((b) =>
+            type === "line" ? (
+              <path
+                key={b.key}
+                d={`${b.high.map((v, i) => `${i ? "L" : "M"}${cx(i).toFixed(1)},${yOf(v).toFixed(1)}`).join("")}${b.low
+                  .map((v, i) => [i, v] as const)
+                  .reverse()
+                  .map(([i, v]) => `L${cx(i).toFixed(1)},${yOf(v).toFixed(1)}`)
+                  .join("")}Z`}
+                fill={b.color}
+                opacity={0.16}
+              />
+            ) : null,
+          )}
           {hover !== null && type === "bar" && <rect x={gutter + hover * band} y={padT} width={band} height={plotH} className="fill-zinc-900/[0.04] dark:fill-white/[0.06]" />}
           {/* Columns */}
           {bars.length > 0 &&
@@ -329,6 +359,19 @@ export function TimeChart({
                 </g>
               );
             })}
+          {type === "bar" &&
+            bands.map((b) => (
+              <g key={b.key} stroke={b.color} strokeWidth={1.25} opacity={0.8}>
+                {dates.map((d, i) =>
+                  (b.high[i] ?? 0) > (b.low[i] ?? 0) ? (
+                    <g key={d}>
+                      <line x1={cx(i)} x2={cx(i)} y1={yOf(b.high[i])} y2={yOf(b.low[i])} />
+                      {barW >= 6 && <line x1={cx(i) - barW / 4} x2={cx(i) + barW / 4} y1={yOf(b.high[i])} y2={yOf(b.high[i])} />}
+                    </g>
+                  ) : null,
+                )}
+              </g>
+            ))}
           {/* Lines */}
           {lines.map((s) => (
             <g key={s.key}>
@@ -363,6 +406,9 @@ export function TimeChart({
             <TooltipRow key={s.key} color={s.color} bar={type === "bar" && !s.line} dashed={s.dashed} value={formatValue(s.values[hover] ?? 0)} label={s.label} />
           ))}
           {showTotal && bars.length > 1 && <TooltipRow value={formatValue(total(hover))} label={totalLabel} strong />}
+          {bands.map((b) => (
+            <TooltipRow key={b.key} value={`${formatValue(b.low[hover] ?? 0)} – ${formatValue(b.high[hover] ?? 0)}`} label={b.label} />
+          ))}
           {importedEnd >= hover && <p className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">{importedLabel}</p>}
         </Tooltip>
       )}

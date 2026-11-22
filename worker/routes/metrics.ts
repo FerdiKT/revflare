@@ -13,6 +13,7 @@ import { atRisk, breakdown, bumpDataVersion, chart, cohorts, customer, forecast,
 import { GOAL_COLUMNS, GOAL_METRIC_INFO, GOALS_MAX, parseGoalInput, rowScope, rowValues, sameAppSet, sameTarget, unknownApps, type GoalRow, type GoalValues } from "../lib/goals";
 import { FxCache, addDays, dayOf } from "../lib/money";
 import { newId, now } from "../lib/util";
+import { projection, summaryOf } from "../lib/projection";
 
 export const metricRoutes = new Hono<AppEnv>();
 const read = requirePermission("read");
@@ -134,6 +135,10 @@ metricRoutes.get("/customers/:id", read, async (c) => {
 metricRoutes.get("/at-risk", read, async (c) => c.json(await atRisk(c.env, { ...scope(c), limit: Number(c.req.query("limit")) || 100 })));
 
 metricRoutes.get("/forecast", read, async (c) => c.json(await forecast(c.env, { ...scope(c), days: Number(c.req.query("days")) || 30 })));
+
+/** Revenue projection (docs/projection.md): computed at most once per UTC day and scope. */
+metricRoutes.get("/projection", read, async (c) => c.json(await projection(c.env, scope(c))));
+metricRoutes.get("/projection/summary", read, async (c) => c.json(summaryOf(await projection(c.env, scope(c)))));
 
 metricRoutes.get("/cohorts", read, async (c) => c.json(await cohorts(c.env, { ...scope(c), months: Number(c.req.query("months")) || 12 })));
 

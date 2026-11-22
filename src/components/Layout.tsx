@@ -67,7 +67,7 @@ const NAV: Array<{ title?: string; items: NavItem[] }> = [
     items: [
       { to: "/at-risk", label: "At risk", icon: LifeBuoy, filters: true },
       { to: "/cohorts", label: "Cohorts", icon: Grid3x3, filters: true },
-      { to: "/forecast", label: "Forecast", icon: TrendingUp, filters: true },
+      { to: "/forecast", label: "Projection", icon: TrendingUp, filters: true },
       { to: "/downloads", label: "Downloads", icon: ArrowDownToLine, filters: true, ios: true },
       { to: "/acquisition", label: "Acquisition", icon: Compass, filters: true, ios: true },
       { to: "/apple-ads", label: "Apple Ads", icon: Megaphone, filters: true, ios: true },

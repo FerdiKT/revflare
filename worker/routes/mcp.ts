@@ -163,6 +163,14 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
       inputSchema: { type: "object", properties: { days: { type: "number" }, apps: rangeProps.apps } },
       run: (c, a) => call(c, "GET", `/forecast${query(a, ["days", "apps"])}`),
     },
+    get_projection: {
+      description:
+        "Revenue projection for the next 30 / 90 / 365 days (workspace currency, proceeds after refunds and commission): totals per horizon (existing = today's subscriptions; withNew = plus new subscribers at the last 28 days' pace and one-time purchases) with a 90% band (expected, low, high), gross, components, MRR at the end; daily and weekly points; per app totals; " +
+        "segments (renewal rate used per app, billing period and stage: trial, intro, r1 / r2 / r3 = 1st / 2nd / 3rd+ renewal; observed, renewed, 95% interval, lowData when < 30 renewals: the rate leans on the portfolio); upcoming long renewals (6 months+, next 90 days: date, price, probability, status); " +
+        "backtest (the model run 30 and 60 days ago vs actual proceeds: error, inBand) and backtestError (mean absolute error); assumptions (proceeds share per app first year / after a year, refund share, weights for auto-renew off / billing retry / grace). summary: true returns only the overview line (next30, next30Previous, next30Change, next30Band). Computed once a day per scope.",
+      inputSchema: { type: "object", properties: { apps: rangeProps.apps, summary: { type: "boolean", description: "Only the overview line" } } },
+      run: (c, a) => call(c, "GET", `/projection${a.summary ? "/summary" : ""}${query(a, ["apps"])}`),
+    },
     get_cohorts: {
       description: "Monthly cohorts by first payment: customers, revenue per month since, cumulative LTV per customer and retained payers.",
       inputSchema: { type: "object", properties: { months: { type: "number" }, apps: rangeProps.apps } },
