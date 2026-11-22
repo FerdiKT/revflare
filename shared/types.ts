@@ -833,8 +833,8 @@ export interface Projection {
   backtestError: { withNew: number | null; existing: number | null };
   inputs: { activeSubscriptions: number; trials: number; autoRenewOff: number; billingRetry: number; grace: number; skipped: number; newStartsPerDay: number; oneTimePerDay: number };
   assumptions: {
-    proceedsShare: { appId: string; firstYear: number; afterYear: number; afterYearAssumed: boolean }[];
-    refundShare: { appId: string; share: number }[];
+    proceedsShare: { appId: string; appName: string | null; firstYear: number; afterYear: number; afterYearAssumed: boolean }[];
+    refundShare: { appId: string; appName: string | null; share: number }[];
     /** Next-payment weights of subscriptions with auto-renew off / in billing retry / in grace. */
     weights: { autoRenewOff: number; billingRetry: number; grace: number };
   };

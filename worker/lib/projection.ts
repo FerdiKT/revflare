@@ -242,8 +242,8 @@ async function compute(db: Db, args: Scope): Promise<Projection> {
       oneTimePerDay: out.inputs.oneTimePerDay,
     },
     assumptions: {
-      proceedsShare: [...out.proceedsShare].filter(([id]) => scoped(id)).map(([appId, p]) => ({ appId, firstYear: p.firstYear, afterYear: p.afterYear, afterYearAssumed: p.afterYearAssumed })),
-      refundShare: [...out.refundShare].filter(([id]) => scoped(id)).map(([appId, r]) => ({ appId, share: r.share })),
+      proceedsShare: [...out.proceedsShare].filter(([id]) => scoped(id)).map(([appId, p]) => ({ appId, appName: name(appId), firstYear: p.firstYear, afterYear: p.afterYear, afterYearAssumed: p.afterYearAssumed })),
+      refundShare: [...out.refundShare].filter(([id]) => scoped(id)).map(([appId, r]) => ({ appId, appName: name(appId), share: r.share })),
       weights: { autoRenewOff: STATE_WEIGHTS.off, billingRetry: STATE_WEIGHTS.retry, grace: STATE_WEIGHTS.grace },
     },
     notes,

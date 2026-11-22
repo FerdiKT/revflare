@@ -294,7 +294,9 @@ function AppsTable({ p, view }: { p: Projection; view: View }) {
 }
 
 function Upcoming({ p }: { p: Projection }) {
+  const [all, setAll] = useState(false);
   if (!p.upcoming.items.length) return null;
+  const shown = all ? p.upcoming.items : p.upcoming.items.slice(0, 15);
   return (
     <Card className="mt-5 overflow-hidden">
       <CardHeader title="Upcoming long renewals" description={`Subscriptions of 6 months or more renewing in the next 90 days (${p.upcoming.count}${p.upcoming.count > p.upcoming.items.length ? `, first ${p.upcoming.items.length} shown` : ""}). Trials: the first charge after the trial.`} />
@@ -312,7 +314,7 @@ function Upcoming({ p }: { p: Projection }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {p.upcoming.items.slice(0, 50).map((u, i) => (
+          {shown.map((u, i) => (
             <tr key={`${u.date}:${i}`}>
               <td className={cn(td, "tabular-nums")}>{date(u.date)}</td>
               <td className={cn(td, "max-w-48 truncate text-sm")}>{u.appName ?? u.appId}</td>
@@ -330,6 +332,13 @@ function Upcoming({ p }: { p: Projection }) {
           ))}
         </tbody>
       </Table>
+      {p.upcoming.items.length > 15 && (
+        <div className="border-t border-zinc-100 px-5 py-2.5 text-xs dark:border-zinc-800">
+          <button type="button" className="font-medium text-brand-600 hover:underline dark:text-brand-400" onClick={() => setAll((x) => !x)}>
+            {all ? "Show fewer" : `Show all ${p.upcoming.items.length}`}
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -390,7 +399,6 @@ function Segments({ p }: { p: Projection }) {
 }
 
 function Assumptions({ p }: { p: Projection }) {
-  const name = (id: string) => p.apps.find((a) => a.appId === id)?.name ?? p.segments.find((s) => s.appId === id)?.appName ?? id;
   const w = p.assumptions.weights;
   return (
     <Card className="mt-5">
@@ -420,7 +428,7 @@ function Assumptions({ p }: { p: Projection }) {
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {p.assumptions.proceedsShare.slice(0, 15).map((s) => (
               <tr key={s.appId}>
-                <td className={cn(td, "max-w-48 truncate py-1.5")}>{name(s.appId)}</td>
+                <td className={cn(td, "max-w-48 truncate py-1.5")}>{s.appName ?? s.appId}</td>
                 <td className={cn(td, "py-1.5 text-right tabular-nums")}>{percent(s.firstYear)}</td>
                 <td className={cn(td, "py-1.5 text-right tabular-nums")} title={s.afterYearAssumed ? "Assumed: Apple's commission drops from 30% to 15% after a year of paid service" : "Measured"}>
                   {percent(s.afterYear)}
