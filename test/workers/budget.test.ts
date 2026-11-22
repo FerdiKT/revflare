@@ -480,7 +480,9 @@ describe("Free plan budget", () => {
     expect(cold.json.items).toHaveLength(4);
     const coldReads = after.rowsRead - before.rowsRead;
     console.log(`goals, cold (4 goals, 3 app sets, a year + the year before): ${coldReads} rows read for ${rangeRows} daily rows in range`);
-    expect(coldReads).toBeLessThanOrEqual(rangeRows + 100);
+    // The fixed part (goals, apps, settings, rollup checks) is ~105 rows today and grows slowly with features; a
+    // regression that reads the year again would add ~2,000.
+    expect(coldReads).toBeLessThanOrEqual(rangeRows + 150);
 
     // A sale today: the recompute reads today's rows only.
     const sale = await notification("SUBSCRIBED", { bundleId: apps[0].bundleId, transactionId: "7799999", purchaseDate: Date.now() - 60_000, expiresDate: Date.now() + 30 * DAY });

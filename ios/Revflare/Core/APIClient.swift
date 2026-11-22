@@ -167,6 +167,8 @@ extension APIClient {
     func atRisk(apps: Set<String> = []) async throws -> AtRisk { try await get("/at-risk", query: ["limit": "50", "apps": appsParam(apps)]) }
 
     func forecast(apps: Set<String> = []) async throws -> Forecast { try await get("/forecast", query: ["days": "30", "apps": appsParam(apps)]) }
+    func projection(apps: Set<String> = []) async throws -> Projection { try await get("/projection", query: ["apps": appsParam(apps)]) }
+    func projectionSummary(apps: Set<String> = []) async throws -> ProjectionSummary { try await get("/projection/summary", query: ["apps": appsParam(apps)]) }
 
     /// Every goal (archived ones too, flagged) in their order, with progress.
     func goals() async throws -> GoalList { try await get("/goals") }

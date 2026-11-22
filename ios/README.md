@@ -76,7 +76,7 @@ with Face ID / Touch ID or the passcode (LocalAuthentication).
 ## Deep links
 
 `revflare://overview`, `charts[/metric]`, `feed`, `apps`, `app/<id>`, `customer/<id>`, `transaction/<transactionId>`,
-`settings`, `notifications`, `goals` (`goals/<id>`: one goal), `at-risk`, `forecast`, `pair?...`, `web-login?...`.
+`settings`, `notifications`, `goals` (`goals/<id>`: one goal), `at-risk`, `forecast` (the revenue projection of the overview's app filter), `pair?...`, `web-login?...`.
 
 Debug builds accept `-RFOpenURL <url>` (open a deep link at launch), `-RFSkipPushPrompt YES` and
 `-RFStartLiveActivity YES` for simulator automation, e.g.

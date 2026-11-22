@@ -44,6 +44,12 @@ All screenshots use synthetic demo data.
 - **Metrics**: revenue and proceeds (Apple's commission, Small Business Program, taxes), MRR and ARR, MRR movement (new,
   expansion, contraction, churn, reactivation), active subscriptions and trials, trial conversion, churn, refunds, new
   customers, ARPU; per app, country and product, in your workspace currency (daily FX rates).
+- **Revenue projection** for the next 30 / 90 / 365 days (web, iOS, CLI, MCP): today's subscriptions walked through
+  their renewals with the renewal rate measured per app, billing period and renewal order (trial conversion, 1st, 2nd,
+  3rd+; auto-renew off and billing retry weighted apart; small segments lean on the portfolio), refunds, the store's
+  commission (first year / after a year) and today's exchange rates, plus new subscribers and one-time purchases at the
+  last 28 days' pace. Proceeds and MRR with a 90% band, upcoming annual renewals, and a backtest that replays the model
+  from 30 and 60 days ago against what really came in. [How it works](docs/projection.md).
 - **Insights**: revenue at risk (billing retry, grace period, auto-renew off), 30-day renewal forecast, cohorts and LTV,
   goals (named; revenue, proceeds, MRR, sales, new subscriptions, trials or actives; per week, month, quarter, year or
   custom dates; on all apps, some apps or all but some; pace, projection and a push when reached), record days, alerts (silent notifications, failing syncs, refund spikes, revenue drops).
@@ -81,8 +87,9 @@ All screenshots use synthetic demo data.
   CLI (`revflare config`) or API. [How it works](docs/remote-config.md).
 - **A/B experiments** on remote config parameters (paywall, onboarding...): 2 to 5 variants with their own values,
   weights, targeting and traffic; devices are assigned at the edge (stable per install, no database work), RevflareKit
-  reports exposures, and the results compare trial and paid conversion and revenue per install of the exposed installs
-  (Bayesian probability to be best, lift vs control with a 95% interval, guardrails before a winner); roll out the
+  reports exposures, and the results compare trial and paid conversion, revenue per install (bootstrap interval) and
+  refunds per variant and product (trial → paid apart from paid at once) of every exposed install (Bayesian probability
+  to be best, lift vs control with a 95% interval, guardrails before a winner); roll out the
   winner as the new defaults in one click. [How it works](docs/experiments.md).
 - **Events and funnels**: RevflareKit sends app events (`Revflare.track`) to Cloudflare Workers Analytics Engine, and
   key events (first open, purchases, paywall views, onboarding, experiment exposures) to the database too, so funnels
