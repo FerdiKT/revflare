@@ -32,7 +32,7 @@ import StoreKit
 /// (country, app version, language, percentage rollout...), cached on the device. Replaces Firebase Remote Config.
 public enum Revflare {
     /// The library version (sent in the `User-Agent`).
-    public static let version = "1.9.2"
+    public static let version = "1.10.0"
 
     private struct Runtime: @unchecked Sendable {
         let reporter: Reporter

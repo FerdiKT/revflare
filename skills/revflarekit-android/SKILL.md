@@ -8,7 +8,7 @@ description: Integrate RevflareKit for Android (the Revflare Android SDK, Kotlin
 RevflareKit for Android talks only to the user's own Revflare server. Source of truth for its API:
 `sdk/android/README.md` in the Revflare repo (`/Volumes/KIOXIA/Projects/revflare` on the user's machine, or a clone of
 github.com/FerdiKT/revflare); the Kotlin sources are in `sdk/android/revflarekit/src/main/kotlin/app/revflare/kit/`.
-Read them when something here is unclear; this skill is kept in sync with them (current version: **1.9.1**, same as
+Read them when something here is unclear; this skill is kept in sync with them (current version: **1.10.0**, same as
 iOS). For iOS apps use the `revflarekit` skill.
 
 Independent parts, pick what the app needs:
@@ -52,7 +52,7 @@ maven {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("io.github.ferdikt:revflarekit:1.9.1")
+    implementation("io.github.ferdikt:revflarekit:1.10.0")
 }
 ```
 

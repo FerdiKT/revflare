@@ -1,6 +1,8 @@
 import { env, fetchMock } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../../worker/lib/db";
+import { splitStatements } from "../../worker/lib/migrate";
+import restoreMigration from "../../migrations/0033_restore_event_names.sql?raw";
 import { eventsTestHooks, resetEventsState } from "../../worker/lib/events";
 import { resetFunnelCache } from "../../worker/lib/funnels";
 import { exactExposures, exactFunnelSteps, keyEventsTestHooks, pruneKeyEvents, ROWS_PER_INSERT } from "../../worker/lib/key-events";
@@ -237,6 +239,54 @@ describe("key events ingest", { timeout: 60_000 }, () => {
     expect((await send(sdkKey, { installId: uuid(20, "bbbbbbbb"), events: [ev("first_open")] })).status).toBe(200);
     expect((await stored(id)).length).toBe(510);
     expect((await call(owner, "/api/v1/alerts")).json.items.filter((a: { kind: string; appId: string }) => a.kind === "key_events_capped" && a.appId === id)).toHaveLength(1);
+  });
+});
+
+describe("restore event names (RevflareKit 1.10.0)", { timeout: 60_000 }, () => {
+  it("stores older SDKs' restore events under the new names, and migration 0033 renames stored ones", async () => {
+    const owner = await ownerClient();
+    const { id, sdkKey } = await newApp(owner, "com.example.keyevents.restore");
+    const install = uuid(1, "abababab");
+    const r = await send(sdkKey, {
+      installId: install,
+      events: [
+        ev("restore_failed", { sessionId: "s1", props: { error: "user_cancelled" } }),
+        ev("restore_cancel", { sessionId: "s1" }),
+        ev("restore_success", { sessionId: "s1", props: { entitlements: "" }, ts: Date.now() - 2 * MIN }),
+      ],
+    });
+    expect(r.status, r.text).toBe(200);
+    expect(r.json).toMatchObject({ accepted: 2, dropped: 1 });
+    expect(points.map((p) => p.blobs?.[0])).toEqual(["restore_cancel", "restore_nothing_found"]);
+    expect((await stored(id)).map((e) => e.name)).toEqual(["restore_cancel", "restore_nothing_found"]);
+
+    // Rows stored before 1.10.0 support: old names, one next to the app's own restore_cancel.
+    const other = uuid(2, "abababab");
+    const t = Date.now() - HOUR;
+    const insert = (eid: string, name: string, ts: number, props: string) =>
+      dbExec("INSERT INTO app_events (app_id, id, install_id, name, ts, received_at, props) VALUES (?, ?, ?, ?, ?, ?, ?)", [id, eid, other, name, ts, ts, props]);
+    await insert("old-1", "restore_failed", t, '{"error":"user_cancelled"}');
+    await insert("old-2", "restore_cancel", t + 100, "{}");
+    await insert("old-3", "restore_failed", t + HOUR / 2, '{"error":"user_cancelled"}');
+    await insert("old-4", "restore_failed", t + HOUR / 2, '{"error":"network_error"}');
+    await insert("old-5", "restore_success", t, '{"entitlements":""}');
+    await insert("old-6", "restore_success", t, '{"entitlements":"pro"}');
+    for (const sql of splitStatements(restoreMigration)) await dbExec(sql);
+    const after = await rows<{ id: string; name: string; props: string }>("SELECT id, name, props FROM app_events WHERE app_id = ? AND id LIKE 'old-%' ORDER BY id", id);
+    expect(after).toEqual([
+      { id: "old-2", name: "restore_cancel", props: "{}" },
+      { id: "old-3", name: "restore_cancel", props: "{}" },
+      { id: "old-4", name: "restore_failed", props: '{"error":"network_error"}' },
+      { id: "old-5", name: "restore_nothing_found", props: "{}" },
+      { id: "old-6", name: "restore_success", props: '{"entitlements":"pro"}' },
+    ]);
+    const counts = await rows<{ name: string; count: number }>("SELECT name, SUM(count) AS count FROM app_event_counts WHERE app_id = ? GROUP BY name ORDER BY name", id);
+    expect(counts).toEqual([
+      { name: "restore_cancel", count: 3 },
+      { name: "restore_failed", count: 1 },
+      { name: "restore_nothing_found", count: 2 },
+      { name: "restore_success", count: 1 },
+    ]);
   });
 });
 

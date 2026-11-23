@@ -34,7 +34,8 @@ public enum RevflareStoreError: LocalizedError, Equatable {
 /// - buys with ``purchase(_:placement:appAccountToken:options:)`` (the install id as `appAccountToken`, so Revflare
 ///   links the purchase to the install's Apple Ads campaign at once) and restores with ``restore()``;
 /// - records the funnel events `purchase_start`, `purchase_success`, `purchase_cancel`, `purchase_pending`,
-///   `purchase_failed`, `restore_start`, `restore_success` and `restore_failed` (see ``Revflare/track(_:properties:)``;
+///   `purchase_failed`, `restore_start`, `restore_success`, `restore_nothing_found`, `restore_cancel` and
+///   `restore_failed` (see ``Revflare/track(_:properties:)``;
 ///   off with ``Revflare/analyticsEnabled``);
 /// - redeems promotional offers signed by the Revflare server
 ///   (``purchase(_:promotionalOffer:placement:appAccountToken:)``, ``promotionalOffers(for:)``) and, on iOS 18+,
@@ -703,13 +704,26 @@ public final class RevflareStore: ObservableObject {
             try await backend.syncWithAppStore()
             invalidateTransactionHistory()
         } catch {
-            trackEvent("restore_failed", ["error": PurchaseEventContext.errorCode(error)])
+            // Closing Apple's sign-in sheet is not a failure (like `purchase_cancel`): `restore_cancel` since 1.10.0.
+            let code = PurchaseEventContext.errorCode(error)
+            if code == "user_cancelled" {
+                trackEvent("restore_cancel", [:])
+            } else {
+                trackEvent("restore_failed", ["error": code])
+            }
             throw error
         }
         await refresh()
         await updateIntroEligibility()
         linkPurchases()
-        trackEvent("restore_success", ["entitlements": customer.active.keys.sorted().joined(separator: ",")])
+        // Nothing to restore on this Apple Account: `restore_nothing_found` since 1.10.0 (was `restore_success` with
+        // empty `entitlements`).
+        let active = customer.active.keys.sorted().joined(separator: ",")
+        if active.isEmpty {
+            trackEvent("restore_nothing_found", [:])
+        } else {
+            trackEvent("restore_success", ["entitlements": active])
+        }
         return customer
     }
 

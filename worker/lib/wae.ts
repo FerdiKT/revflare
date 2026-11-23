@@ -184,6 +184,29 @@ export interface StepQuery {
   test?: TestFilter;
 }
 
+// Restore events of RevflareKit before 1.10.0 stored in Analytics Engine under their old names (worker/lib/events.ts,
+// normalizeEvent): a step on a new name also matches them, a step on an old name leaves them out.
+const LEGACY_CANCEL = `position(${sqlNeedle('"error":"user_cancelled"')} IN ${COLUMNS.props})`;
+const LEGACY_NOTHING_FOUND = `position(${sqlNeedle('"entitlements":""')} IN ${COLUMNS.props})`;
+
+/** The event-name condition of a funnel step (restore events of older SDKs read under their current names). */
+export function stepNameSql(name: string): string {
+  const n = COLUMNS.name;
+  const eq = `${n} = ${sqlString(name, EVENT_NAME_RE)}`;
+  switch (name) {
+    case "restore_cancel":
+      return `(${eq} OR (${n} = 'restore_failed' AND ${LEGACY_CANCEL} > 0))`;
+    case "restore_failed":
+      return `(${eq} AND ${LEGACY_CANCEL} = 0)`;
+    case "restore_nothing_found":
+      return `(${eq} OR (${n} = 'restore_success' AND ${LEGACY_NOTHING_FOUND} > 0))`;
+    case "restore_success":
+      return `(${eq} AND ${LEGACY_NOTHING_FOUND} = 0)`;
+    default:
+      return eq;
+  }
+}
+
 /** Per install: first and last time of an event step in the range, how many times, sample interval, breakdown value at the first time. */
 export function stepSql(dataset: string, q: StepQuery): string {
   if (!DATASET_RE.test(dataset)) throw new SqlValueError("Invalid dataset");
@@ -191,7 +214,7 @@ export function stepSql(dataset: string, q: StepQuery): string {
   // Events are received after they happen (offline queue: up to 7 days later), devices may run up to 1 h ahead.
   const where = [
     appScope(q.appId, q.fromMs - 3_600_000, q.toMs + 8 * 86_400_000, q.test),
-    `${COLUMNS.name} = ${sqlString(q.name, EVENT_NAME_RE)}`,
+    stepNameSql(q.name),
     `${ts} >= ${sqlInt(q.fromMs)}`,
     `${ts} < ${sqlInt(q.toMs)}`,
     ...(q.filters ?? []).map(filterSql),

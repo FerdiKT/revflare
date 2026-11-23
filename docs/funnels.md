@@ -101,6 +101,23 @@ Readers:
   match the `"key":"value"` pair).
 - Events older than 7 days or more than 1 hour ahead of the server are dropped (an offline queue should flush sooner).
 
+### Restore events
+
+`RevflareStore.restore()` sends `restore_start`, then one of `restore_success` (at least one entitlement active,
+`entitlements`), `restore_nothing_found` (the store account has nothing to restore), `restore_cancel` (the user closed
+Apple's sign-in sheet) or `restore_failed` (a real error, `error`). The last two names came with **RevflareKit 1.10.0**
+(iOS and Android; Android has no cancel). Before, a closed sign-in sheet was `restore_failed` with `error=user_cancelled` and an empty restore
+`restore_success` with `entitlements=""`. So that every report counts them the same whatever the SDK version:
+
+- **Ingest** renames them (`normalizeEvent`, `worker/lib/events.ts`), and keeps one `restore_cancel` /
+  `restore_nothing_found` per session within 10 s of a batch (apps that tracked these names themselves next to an
+  older SDK sent both; the duplicate is counted in `dropped`).
+- **Stored key events** received before were renamed by migration `0033_restore_event_names.sql` (the duplicates
+  deleted, the events page rollup of these names rebuilt).
+- **Analytics Engine** rows are immutable: a funnel step on `restore_cancel` / `restore_nothing_found` also matches the
+  old form, and a step on `restore_failed` / `restore_success` leaves it out (`stepNameSql`, `worker/lib/wae.ts`). The
+  events page shows sampled (pre-key-event) days under the names they were sent with.
+
 ## Funnel semantics
 
 A funnel has 2 to 10 steps:

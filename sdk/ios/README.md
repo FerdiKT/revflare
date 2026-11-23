@@ -6,7 +6,7 @@ optional StoreKit 2 purchases / entitlements layer (`RevflareStore`) for apps th
 Add the package, call `Revflare.configure(sdkKey:server:)` once at launch with the app's SDK key and your Revflare
 server, and Revflare shows revenue per Apple Ads campaign, ad group and keyword (Revflare web → Apple Ads, `revflare` CLI, MCP `get_attributed_revenue`).
 
-Version **1.9.2** (`Revflare.version`). [Changes](#changes).
+Version **1.10.0** (`Revflare.version`). [Changes](#changes).
 
 - iOS 15+ (also builds for macOS 12+). No dependencies. No UI, no permission prompt.
 - Never blocks the main thread: everything runs in the background, in one actor.
@@ -106,14 +106,14 @@ GitHub account with access to it (Xcode → Settings → Accounts), and Xcode Cl
 repository.
 
 - **Xcode:** File → Add Package Dependencies… → `https://github.com/FerdiKT/RevflareKit` → Up to Next Major from
-  `1.9.2`, then add the `RevflareKit` library to the app target.
+  `1.10.0`, then add the `RevflareKit` library to the app target.
 - **XcodeGen** (`project.yml`):
 
   ```yaml
   packages:
     RevflareKit:
       url: https://github.com/FerdiKT/RevflareKit
-      from: 1.9.2
+      from: 1.10.0
   targets:
     MyApp:
       dependencies:
@@ -123,7 +123,7 @@ repository.
 - **Package.swift:**
 
   ```swift
-  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.9.2")
+  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.10.0")
   // target dependency: .product(name: "RevflareKit", package: "RevflareKit")
   ```
 
@@ -828,7 +828,11 @@ memory), and nothing at all once the app sets `Revflare.analyticsEnabled = false
 | `purchase_cancel` | The user closed the sheet. | same |
 | `purchase_pending` | Ask to Buy / SCA. | same |
 | `purchase_failed` | StoreKit error or unverified transaction. | same + `error` (`network_error`, `purchase_not_allowed`, `failed_verification`, `NSURLErrorDomain:-1009`...) |
-| `restore_start` / `restore_success` / `restore_failed` | `RevflareStore.restore()`. | `entitlements` (active after the restore) / `error` |
+| `restore_start` | `RevflareStore.restore()` starts. | |
+| `restore_success` | Restored: at least one entitlement is active afterwards. | `entitlements` (active after the restore, comma-separated) |
+| `restore_nothing_found` | Restored, but the Apple Account has nothing to restore (1.10.0; before: `restore_success` with empty `entitlements`). | |
+| `restore_cancel` | The user closed Apple's sign-in sheet (1.10.0; before: `restore_failed` with `error=user_cancelled`). | |
+| `restore_failed` | A real error (network, StoreKit...). | `error` |
 
 Purchase events only come from `RevflareStore`; apps buying through RevenueCat or their own StoreKit code can track
 them with `Revflare.track` (Revflare's revenue numbers come from Apple either way). Every event also carries a session
@@ -1258,6 +1262,12 @@ install is organic).
 
 ## Changes
 
+- **1.10.0**: event names of `RevflareStore.restore()` (only matters to apps counting these events themselves): closing
+  Apple's sign-in sheet is now `restore_cancel` (was `restore_failed` with `error=user_cancelled`), and a restore that
+  finds no purchase is `restore_nothing_found` (was `restore_success` with empty `entitlements`). `restore_success` now
+  always has at least one entitlement, `restore_failed` is only a real error. Apps that sent `restore_cancel` /
+  `restore_nothing_found` themselves should drop their own calls when updating (else each restore counts twice). The
+  server (Revflare 0.3.0+) reads older SDKs' events under the new names too.
 - **1.9.2**: no longer reads disk space (an Apple required-reason API with no allowed reason for ad networks); the Meta `extinfo` disk fields are `0`.
 - **1.9.1**: the cached pass history is checked against `Transaction.currentEntitlements` on every refresh (also on
   foreground): it is re-read when the latest transaction of a pass product changed (a pass bought on another device, a
