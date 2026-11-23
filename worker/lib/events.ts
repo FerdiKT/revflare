@@ -109,6 +109,45 @@ export function parseEvent(v: unknown, at: number): SdkEvent | null {
   return { id: e.id.toLowerCase(), name: e.name, ts, sessionId, props };
 }
 
+// Restore events (RevflareKit 1.10.0): closing Apple's sign-in sheet is `restore_cancel`, a restore without purchases
+// `restore_nothing_found`. Older SDKs sent them as `restore_failed` (error=user_cancelled) and `restore_success`
+// (entitlements=""): renamed here, so every reader (Analytics Engine, key events, funnels) sees the new names. Some apps
+// tracked the new names themselves next to an older SDK (HeadsUp 1.2.6): within a batch, one `restore_cancel` /
+// `restore_nothing_found` per session and RESTORE_DEDUPE_MS is kept. Stored key events were renamed by migration 0033.
+export const RESTORE_DEDUPE_MS = 10_000;
+
+/** The event under its current name (a copy when renamed), or the event itself. */
+export function normalizeEvent(e: SdkEvent): SdkEvent {
+  if (e.name === "restore_failed" && e.props.error === "user_cancelled") {
+    const { error: _error, ...props } = e.props;
+    return { ...e, name: "restore_cancel", props };
+  }
+  if (e.name === "restore_success" && e.props.entitlements === "") {
+    const { entitlements: _entitlements, ...props } = e.props;
+    return { ...e, name: "restore_nothing_found", props };
+  }
+  return e;
+}
+
+/** Normalized events, without the second `restore_cancel` / `restore_nothing_found` of a session within RESTORE_DEDUPE_MS. */
+export function normalizeEvents(events: SdkEvent[]): { events: SdkEvent[]; duplicates: number } {
+  const out: SdkEvent[] = [];
+  const kept: SdkEvent[] = [];
+  let duplicates = 0;
+  for (const raw of events) {
+    const e = normalizeEvent(raw);
+    if (e.name === "restore_cancel" || e.name === "restore_nothing_found") {
+      if (kept.some((k) => k.name === e.name && k.sessionId === e.sessionId && Math.abs(k.ts - e.ts) <= RESTORE_DEDUPE_MS)) {
+        duplicates++;
+        continue;
+      }
+      kept.push(e);
+    }
+    out.push(e);
+  }
+  return { events: out, duplicates };
+}
+
 /** Validates a request body. Invalid events are dropped (counted); a bad envelope is an error. */
 export function parseBatch(body: unknown, at: number): EventBatch | { error: string; status: 400 | 413 } {
   if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Expected a JSON object { installId, events: [...] }", status: 400 };
@@ -128,6 +167,8 @@ export function parseBatch(body: unknown, at: number): EventBatch | { error: str
     seen.add(e.id);
     events.push(e);
   }
+  const normalized = normalizeEvents(events);
+  dropped += normalized.duplicates;
   return {
     installId: b.installId.toLowerCase(),
     appVersion: short(b.appVersion, 32),
@@ -135,7 +176,7 @@ export function parseBatch(body: unknown, at: number): EventBatch | { error: str
     osVersion: short(b.osVersion, 32),
     locale: short(b.locale, 16),
     environment: parseSdkEnvironment(b.environment),
-    events,
+    events: normalized.events,
     dropped,
   };
 }

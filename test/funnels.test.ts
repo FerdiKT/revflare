@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { COLUMNS, dataPoint, EVENTS_LAYOUT_VERSION, parseBatch, parseEvent, RATE_LIMITS, resetEventsState, takeTokens } from "../worker/lib/events";
+import { COLUMNS, dataPoint, EVENTS_LAYOUT_VERSION, normalizeEvents, parseBatch, parseEvent, RATE_LIMITS, resetEventsState, takeTokens } from "../worker/lib/events";
 import { computeFunnel, median, parseFunnel, parseReportQuery, parseWindow, reportSteps, type StepData, type StepHit } from "../worker/lib/funnels";
-import { analyticsMissing, appScope, filterSql, SqlValueError, sqlInt, sqlString, stepSql, summarySql, testFilterSql } from "../worker/lib/wae";
+import { analyticsMissing, appScope, filterSql, SqlValueError, sqlInt, sqlString, stepNameSql, stepSql, summarySql, testFilterSql } from "../worker/lib/wae";
 import { EVENT_NAME_RE, type FunnelStep } from "../shared/types";
 
 const NOW = Date.UTC(2026, 9, 20, 12);
@@ -136,6 +136,43 @@ describe("Analytics Engine SQL building", () => {
     const s = summarySql("revflare_events", "app_1", NOW - DAY, NOW, { excludedInstalls: [uuid(4)] });
     for (const q of [s.top, s.daily, s.totals]) expect(q).toContain(`AND (blob18 = 'production' OR double3 < 2) AND blob2 NOT IN ('${uuid(4)}')`);
     for (const q of Object.values(summarySql("revflare_events", "app_1", NOW - DAY, NOW, { includeTest: true }))) expect(q).not.toContain("blob18");
+  });
+
+  it("reads restore events of RevflareKit before 1.10.0 under their current names", () => {
+    expect(stepNameSql("paywall_view")).toBe("blob1 = 'paywall_view'");
+    expect(stepNameSql("restore_cancel")).toBe(`(blob1 = 'restore_cancel' OR (blob1 = 'restore_failed' AND position('"error":"user_cancelled"' IN blob11) > 0))`);
+    expect(stepNameSql("restore_failed")).toBe(`(blob1 = 'restore_failed' AND position('"error":"user_cancelled"' IN blob11) = 0)`);
+    expect(stepNameSql("restore_nothing_found")).toBe(`(blob1 = 'restore_nothing_found' OR (blob1 = 'restore_success' AND position('"entitlements":""' IN blob11) > 0))`);
+    expect(stepNameSql("restore_success")).toBe(`(blob1 = 'restore_success' AND position('"entitlements":""' IN blob11) = 0)`);
+    expect(stepSql("revflare_events", { appId: "app_1", name: "restore_cancel", fromMs: 0, toMs: 1, limit: 1 })).toContain(stepNameSql("restore_cancel"));
+  });
+
+  it("renames older SDKs' restore events at ingest and keeps one per session within 10 s", () => {
+    const e = (id: number, name: string, props: Record<string, string>, ts = NOW, sessionId = "s1") => ({ id: uuid(id), name, ts, sessionId, props });
+    const { events, duplicates } = normalizeEvents([
+      e(1, "restore_failed", { error: "user_cancelled" }),
+      e(2, "restore_cancel", {}, NOW + 50), // HeadsUp 1.2.6 tracked it itself: a duplicate
+      e(3, "restore_failed", { error: "network_error" }),
+      e(4, "restore_success", { entitlements: "" }),
+      e(5, "restore_nothing_found", {}, NOW + 9_000),
+      e(6, "restore_success", { entitlements: "pro" }),
+      e(7, "restore_success", {}), // no entitlements prop: an app's own event, unchanged
+      e(8, "restore_cancel", {}, NOW + 60_000), // a later restore
+      e(9, "restore_cancel", {}, NOW, "s2"), // another session
+    ]);
+    expect(duplicates).toBe(2);
+    expect(events.map((x) => [x.id, x.name, x.props])).toEqual([
+      [uuid(1), "restore_cancel", {}],
+      [uuid(3), "restore_failed", { error: "network_error" }],
+      [uuid(4), "restore_nothing_found", {}],
+      [uuid(6), "restore_success", { entitlements: "pro" }],
+      [uuid(7), "restore_success", {}],
+      [uuid(8), "restore_cancel", {}],
+      [uuid(9), "restore_cancel", {}],
+    ]);
+    const batch = parseBatch({ installId: uuid(1), events: [{ id: uuid(20), name: "restore_failed", ts: NOW, props: { error: "user_cancelled" } }, { id: uuid(21), name: "restore_cancel", ts: NOW }] }, NOW);
+    expect("events" in batch && batch.events.map((x) => x.name)).toEqual(["restore_cancel"]);
+    expect("events" in batch && batch.dropped).toBe(1);
   });
 
   it("filters promoted props by column and others inside the props JSON", () => {

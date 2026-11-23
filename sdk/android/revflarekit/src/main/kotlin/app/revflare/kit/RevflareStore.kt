@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference
  * - buys with [purchase] (the install id as the obfuscated account id, so Revflare links the purchase to the install)
  *   and restores with [restore];
  * - records the funnel events `purchase_start`, `purchase_success`, `purchase_cancel`, `purchase_pending`,
- *   `purchase_failed`, `restore_start`, `restore_success` and `restore_failed`.
+ *   `purchase_failed`, `restore_start`, `restore_success`, `restore_nothing_found` and `restore_failed`.
  *
  * **The store owns the app's purchases** (it acknowledges and consumes them): do not use it in an app that also uses
  * RevenueCat or another purchase SDK. Such apps call [Revflare.configure] alone (attribution-only mode), which never
@@ -578,7 +578,11 @@ public class RevflareStore internal constructor(
         }
         linkPurchases()
         val entitlements = _entitlements.value
-        trackEvent("restore_success", mapOf("entitlements" to entitlements.active.keys.sorted().joinToString(",")))
+        // Nothing to restore on this Google account: restore_nothing_found since 1.10.0 (was restore_success with
+        // empty entitlements).
+        val active = entitlements.active.keys.sorted().joinToString(",")
+        if (active.isEmpty()) trackEvent("restore_nothing_found", emptyMap())
+        else trackEvent("restore_success", mapOf("entitlements" to active))
         return entitlements
     }
 

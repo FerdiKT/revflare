@@ -40,7 +40,7 @@ import java.io.File
  */
 public object Revflare {
     /** The library version (sent in the `User-Agent` and config requests). */
-    public const val VERSION: String = "1.9.1"
+    public const val VERSION: String = "1.10.0"
 
     private class Runtime(
         val context: Context,

@@ -5,7 +5,7 @@ tracker, plus offerings, funnel events, remote config and an optional Google Pla
 layer (`RevflareStore`) for apps that want to drop RevenueCat. The Android counterpart of the iOS SDK in
 [`sdk/ios`](../ios/README.md): same server, same wire formats, same names where Android allows.
 
-Version **1.9.1** (`Revflare.VERSION`, same as iOS). See [Changes](#changes).
+Version **1.10.0** (`Revflare.VERSION`, same as iOS). See [Changes](#changes).
 
 - Android 7.0+ (minSdk 24), Kotlin, coroutines. Play Billing Library 9.1.0, Play Install Referrer 2.2. No Facebook
   SDK, no Google Play services requirement (the advertising id is optional).
@@ -28,7 +28,7 @@ developer notifications): see [docs/google-play.md](../../docs/google-play.md).
 ### GitHub Packages (now)
 
 RevflareKit is published to GitHub Packages (`https://maven.pkg.github.com/FerdiKT/RevflareKit-Android`) as
-`io.github.ferdikt:revflarekit:1.9.1`. GitHub Packages needs credentials even for reading: a GitHub user and a
+`io.github.ferdikt:revflarekit:1.10.0`. GitHub Packages needs credentials even for reading: a GitHub user and a
 personal access token (classic) with `read:packages`.
 
 ```kotlin
@@ -57,7 +57,7 @@ gpr.key=ghp_...
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    implementation("io.github.ferdikt:revflarekit:1.9.1")
+    implementation("io.github.ferdikt:revflarekit:1.10.0")
     // Optional, only for Meta ads matching: lets RevflareKit read the Google advertising id.
     // implementation("com.google.android.gms:play-services-ads-identifier:18.3.0")
 }
@@ -181,7 +181,7 @@ What the store does for you:
   after a restart). Without `onConsumablePurchased` they stay unconsumed (blocking a new purchase of the product) until
   the app grants them and calls `store.consume(purchase)`;
 - records `purchase_start` / `purchase_success` / `purchase_cancel` / `purchase_pending` / `purchase_failed` and
-  `restore_start` / `restore_success` / `restore_failed`.
+  `restore_start` / `restore_success` (at least one entitlement) / `restore_nothing_found` / `restore_failed`.
 
 ### Server-driven entitlements
 
@@ -458,6 +458,11 @@ non-renewing passes (merge rules, durations, stacking, refunds, expiry refresh) 
 for the transport, the clock, storage and Play Billing.
 
 ## Changes
+
+### 1.10.0
+
+- A restore that finds no purchase records `restore_nothing_found` (was `restore_success` with empty `entitlements`);
+  `restore_success` always has at least one entitlement. Same names as iOS.
 
 ### 1.9.1
 

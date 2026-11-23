@@ -7,7 +7,7 @@ description: Integrate RevflareKit (the Revflare iOS SDK, Swift package in the R
 
 RevflareKit talks only to the user's own Revflare server. Source of truth for its API: `sdk/ios/README.md` in the
 Revflare repo (`/Volumes/KIOXIA/Projects/revflare` on the user's machine, or a clone of github.com/FerdiKT/revflare).
-Read it when something here is unclear; this skill is kept in sync with it (current version: **1.9.2**).
+Read it when something here is unclear; this skill is kept in sync with it (current version: **1.10.0**).
 
 Independent parts, pick what the app needs:
 
@@ -40,7 +40,7 @@ RevflareKit is its own Swift package: `https://github.com/FerdiKT/RevflareKit` (
 packages:
   RevflareKit:
     url: https://github.com/FerdiKT/RevflareKit
-    from: 1.9.2
+    from: 1.10.0
 targets:
   MyApp:
     dependencies:
@@ -168,7 +168,10 @@ Workers Analytics Engine, tied to the random install id; not tracking). After `R
 automatic: `first_open` (once per install; apps updating from ≤ 1.3 get none), `app_open` (each launch),
 `session_start` (launch, or back after ≥ 30 min in background), `app_background`, and with RevflareStore
 `purchase_start` / `purchase_success` / `purchase_cancel` / `purchase_pending` / `purchase_failed` (`error`),
-`restore_start` / `restore_success` / `restore_failed` (props `product`, `offering`, `package`, `placement`).
+`restore_start` / `restore_success` (≥ 1 entitlement) / `restore_nothing_found` / `restore_cancel` (Apple sign-in
+closed) / `restore_failed` (`error`, real errors only) (purchase props `product`, `offering`, `package`, `placement`).
+Since 1.10.0 the SDK sends `restore_cancel` / `restore_nothing_found` itself: when updating an app that tracked them by
+hand, remove those calls (else they count twice).
 
 What to instrument (ask the user which flows matter; don't spray events everywhere):
 

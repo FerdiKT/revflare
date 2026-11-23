@@ -648,4 +648,18 @@ final class StorePurchaseEventsTests: XCTestCase {
         XCTAssertEqual(events.current[1].1, ["entitlements": "pro"])
         XCTAssertEqual(events.current[3].1, ["error": "NSURLErrorDomain:-1012"])
     }
+
+    /// 1.10.0: closing Apple's sign-in sheet is `restore_cancel`, a restore without purchases `restore_nothing_found`.
+    func testRestoreCancelAndNothingFound() async throws {
+        let store = makeStore()
+        try await store.restore()
+        backend.syncError.withLock { $0 = StoreKitError.userCancelled }
+        do {
+            try await store.restore()
+            XCTFail("expected an error")
+        } catch {}
+        XCTAssertEqual(names, ["restore_start", "restore_nothing_found", "restore_start", "restore_cancel"])
+        XCTAssertEqual(events.current[1].1, [:])
+        XCTAssertEqual(events.current[3].1, [:])
+    }
 }

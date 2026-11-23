@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "io.github.ferdikt"
-version = "1.9.1" // = Revflare.VERSION
+version = "1.10.0" // = Revflare.VERSION
 
 android {
     namespace = "app.revflare.kit"

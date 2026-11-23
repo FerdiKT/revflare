@@ -254,6 +254,13 @@ class StoreTest {
     }
 
     @Test
+    fun restoreWithoutPurchasesIsNothingFound() = runTest {
+        val h = harness()
+        h.store.restore()
+        assertEquals(listOf("restore_start" to emptyMap(), "restore_nothing_found" to emptyMap<String, String>()), h.events)
+    }
+
+    @Test
     fun entitlementRules() {
         val mapping = EntitlementMapping.of(mapOf("pro" to listOf("pro:monthly", "pro_lifetime"), "extra" to listOf("addon")))
         val purchases = listOf(
