@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/FerdiKT/revflare/compare/cli-v0.2.0...cli-v0.3.0) (2026-11-27)
+
+
+### Features
+
+* **refunds:** answer only with in-app consent and confirmed delivery (RevflareKit 1.11.0) ([#10](https://github.com/FerdiKT/revflare/issues/10)) ([d9cb491](https://github.com/FerdiKT/revflare/commit/d9cb491a4face508b4534431107fb9eab2594229))
+
 ## [0.2.0](https://github.com/FerdiKT/revflare/compare/cli-v0.1.0...cli-v0.2.0) (2026-11-22)
 
 
