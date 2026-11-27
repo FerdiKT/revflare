@@ -12,11 +12,12 @@ const SETTINGS: RefundRequestSettings = {
   consentAttested: true,
   consentAttestedAt: Date.UTC(2026, 9, 1),
   consentAttestedBy: "Owner <owner@example.com>",
+  consentSource: "in_app",
   refundPolicy: "decline_if_delivered_after_days",
   declineAfterDays: 30,
   sampleContentProvided: false,
   consumptionPercent: null,
-  deliveryStatus: "DELIVERED",
+  deliveryStatus: "DELIVERED_IF_CONFIRMED",
   notifications: { status: "revflare", forwarded: false, lastNotificationAt: null },
   stats: { pending: 0, sent: 4, skipped: 1, failed: 0, expired: 1 },
   lastSentAt: Date.UTC(2026, 9, 20, 12),
@@ -34,6 +35,9 @@ describe("refundsUpdateBody", () => {
       consumptionPercent: 50,
     });
     expect(refundsUpdateBody({ policy: "grant_full", consumed: "none" })).toEqual({ refundPolicy: "grant_full", consumptionPercent: null });
+    expect(refundsUpdateBody({ "consent-source": "attested" })).toEqual({ consentSource: "attested" });
+    expect(refundsUpdateBody({ "consent-source": "in-app" })).toEqual({ consentSource: "in_app" });
+    expect(() => refundsUpdateBody({ "consent-source": "everyone" })).toThrow(/--consent-source/);
     expect(() => refundsUpdateBody({ policy: "maybe" })).toThrow(/Unknown policy/);
     expect(() => refundsUpdateBody({ days: "0" })).toThrow(/--days/);
     expect(() => refundsUpdateBody({ consumed: "120" })).toThrow(/--consumed/);
