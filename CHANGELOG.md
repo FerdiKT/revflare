@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/FerdiKT/revflare/compare/v0.2.0...v0.3.0) (2026-11-27)
+
+
+### Features
+
+* **events:** restore_cancel and restore_nothing_found (RevflareKit 1.10.0) ([#6](https://github.com/FerdiKT/revflare/issues/6)) ([47fdf7e](https://github.com/FerdiKT/revflare/commit/47fdf7e4b29e13d5bda8b75535547d255e2b1534))
+* **refunds:** answer only with in-app consent and confirmed delivery (RevflareKit 1.11.0) ([#10](https://github.com/FerdiKT/revflare/issues/10)) ([d9cb491](https://github.com/FerdiKT/revflare/commit/d9cb491a4face508b4534431107fb9eab2594229))
+
+
+### Bug Fixes
+
+* **ci:** publish RevflareKit mirrors on top of their history ([#8](https://github.com/FerdiKT/revflare/issues/8)) ([71420bf](https://github.com/FerdiKT/revflare/commit/71420bfd46322dd22ace0552a96f4f9fafe92e4b))
+* **revflarekit:** ship a privacy manifest (1.10.1) ([#9](https://github.com/FerdiKT/revflare/issues/9)) ([8614ad7](https://github.com/FerdiKT/revflare/commit/8614ad7f191e8e855bf8f0fc741f91702960e135))
+
 ## [0.2.0](https://github.com/FerdiKT/revflare/compare/v0.1.0...v0.2.0) (2026-11-22)
 
 
