@@ -7,7 +7,7 @@ description: Integrate RevflareKit (the Revflare iOS SDK, Swift package in the R
 
 RevflareKit talks only to the user's own Revflare server. Source of truth for its API: `sdk/ios/README.md` in the
 Revflare repo (`/Volumes/KIOXIA/Projects/revflare` on the user's machine, or a clone of github.com/FerdiKT/revflare).
-Read it when something here is unclear; this skill is kept in sync with it (current version: **1.10.1**).
+Read it when something here is unclear; this skill is kept in sync with it (current version: **1.11.0**).
 
 Independent parts, pick what the app needs:
 
@@ -40,7 +40,7 @@ RevflareKit is its own Swift package: `https://github.com/FerdiKT/RevflareKit` (
 packages:
   RevflareKit:
     url: https://github.com/FerdiKT/RevflareKit
-    from: 1.10.1
+    from: 1.11.0
 targets:
   MyApp:
     dependencies:
@@ -321,6 +321,16 @@ Revflare.collectDeviceIdentifiers()   // also the opt-in for apps without the Fa
   used for Third-Party Advertising and tracking.
 - Verify: `revflare meta <app> test` (with a test event code), then `revflare meta <app> log` after a sandbox or real
   purchase (skip reasons explain missing identifiers / ATT).
+
+## 9b. Refund requests (1.11+): consent and delivery
+
+If the developer wants Revflare to answer Apple's refund requests (server setting, off by default), the app needs:
+an opt-in the customer controls (never pre-checked, not ATT; e.g. a Settings toggle) calling
+`Revflare.setRefundDataConsent(true/false)` (`Revflare.refundDataConsent` is nil until answered: existing users stay
+without consent), and purchases through `RevflareStore` (it reports delivered purchases itself). Revflare answers only
+for consenting customers (default consent source "in app") and only with DELIVERED for purchases RevflareStore
+reported; others are not answered. Test in Sandbox: consent on, consent off, purchase not delivered. Privacy answers:
+purchase / usage data shared with Apple for refund handling (App Functionality).
 
 ## 10. App Store privacy answers
 

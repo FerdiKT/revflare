@@ -1475,6 +1475,9 @@ export interface MetaDelivery {
 export type RefundPolicy = "none" | "decline" | "decline_if_delivered_after_days" | "grant_prorated" | "grant_full";
 
 /** Refund requests of an app (GET/PUT /apps/:id/integrations/refunds): answers to Apple's CONSUMPTION_REQUEST notifications. */
+/** Whose consent counts for refund request answers: in_app = only customers who agreed in the app (RevflareKit 1.11+ Revflare.setRefundDataConsent); attested = every customer, on the developer's attestation (consent obtained another way, e.g. the app's terms). */
+export type RefundConsentSource = "in_app" | "attested";
+
 export interface RefundRequestSettings {
   /** Where the settings come from: the app's own, the workspace defaults (GET /integrations/refunds/defaults), or none (off). */
   source?: "app" | "workspace" | "none";
@@ -1485,6 +1488,8 @@ export interface RefundRequestSettings {
   consentAttestedAt: number | null;
   /** Who confirmed it (name and email). */
   consentAttestedBy: string | null;
+  /** Whose consent counts (default in_app). */
+  consentSource: RefundConsentSource;
   /** none: no preference sent (default); decline: DECLINE (content delivered) at any age; decline_if_delivered_after_days: DECLINE when the purchase (or the subscription) is at least `declineAfterDays` days old; grant_prorated / grant_full. */
   refundPolicy: RefundPolicy;
   declineAfterDays: number | null;
@@ -1492,8 +1497,8 @@ export interface RefundRequestSettings {
   sampleContentProvided: boolean;
   /** Optional consumed percentage (0-100) sent for consumables, non-consumables and non-renewing subscriptions; null = not sent. Never sent for auto-renewable subscriptions. */
   consumptionPercent: number | null;
-  /** Always DELIVERED: Revflare cannot know about delivery problems. */
-  deliveryStatus: "DELIVERED";
+  /** DELIVERED is sent only for purchases RevflareKit's RevflareStore reported as delivered (1.11+); other requests are not answered. */
+  deliveryStatus: "DELIVERED_IF_CONFIRMED";
   /** Where the app's notifications go. Revflare answers requests that reach its URL (also when it forwards them) and, for apps whose URL is another server's, requests polled from Notification History inside Apple's 12 hours. */
   notifications: { status: "revflare" | "other" | "unknown" | string; forwarded: boolean; lastNotificationAt: number | null };
   stats: { pending: number; sent: number; skipped: number; failed: number; expired: number };
@@ -1507,6 +1512,7 @@ export interface RefundRequestDefaults {
   consentAttested: boolean;
   consentAttestedAt: number | null;
   consentAttestedBy: string | null;
+  consentSource: RefundConsentSource;
   refundPolicy: RefundPolicy;
   declineAfterDays: number | null;
   sampleContentProvided: boolean;
@@ -1522,6 +1528,7 @@ export interface RefundRequestSettingsUpdate {
   enabled?: boolean;
   /** true records who confirmed it and when; false withdraws it (and turns answers off). */
   consentAttested?: boolean;
+  consentSource?: RefundConsentSource;
   refundPolicy?: RefundPolicy;
   /** 1-3650, required with decline_if_delivered_after_days. */
   declineAfterDays?: number | null;

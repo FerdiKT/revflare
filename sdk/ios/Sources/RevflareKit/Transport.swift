@@ -10,6 +10,11 @@ struct ReportBody: Codable, Equatable, Sendable {
     /// When RevflareKit first ran on this device (ms since 1970, ``ReporterState/firstAttemptAt``): the install time
     /// for LTV, so a first report that arrives late (offline first launch) keeps the right install time.
     var installedAt: Int64?
+    /// 1.11: the customer's answer in the app to sharing consumption data with Apple for refund requests
+    /// (``Revflare/setRefundDataConsent(_:)``), for `originalTransactionIds`. Nil: never answered.
+    var refundDataConsent: Bool?
+    /// 1.11: those of `originalTransactionIds` RevflareStore delivered (they gave access on this device).
+    var deliveredTransactionIds: [String]?
 }
 
 /// Body of `POST /sdk/v1/identifiers`: what Revflare needs to send this install's purchases to Meta's Conversions API.

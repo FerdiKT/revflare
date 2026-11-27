@@ -291,6 +291,47 @@ final class LinkingTests: XCTestCase {
         XCTAssertEqual(h.transport.requests.current.count, 5)
     }
 
+    /// 1.11, refund requests: a consent answer re-sends every owned purchase with it; delivered ones go once.
+    func testRefundConsentAndDeliveries() async {
+        let h = Harness()
+        h.transport.defaultReply = .status(200, #"{"ok":true,"attribution":"resolved","source":"organic"}"#)
+        h.transactions.ids.withLock { $0 = ["100", "200"] }
+        await h.makeReporter().sync(.launch)
+        var links = h.transport.bodies.filter { $0.originalTransactionIds != nil }
+        XCTAssertEqual(links.count, 1)
+        XCTAssertNil(links[0].refundDataConsent)
+        XCTAssertNil(links[0].deliveredTransactionIds)
+
+        // The customer agrees; RevflareStore delivered 200 (and 999, not owned here: never sent).
+        Reporter.setRefundConsent(true, store: h.store)
+        XCTAssertTrue(Reporter.noteDelivered(["200", "999"], store: h.store))
+        XCTAssertFalse(Reporter.noteDelivered(["200"], store: h.store))
+        await h.makeReporter().sync(.launch)
+        links = h.transport.bodies.filter { $0.originalTransactionIds != nil }
+        XCTAssertEqual(links.count, 2)
+        XCTAssertEqual(links[1].originalTransactionIds, ["100", "200"])
+        XCTAssertEqual(links[1].refundDataConsent, true)
+        XCTAssertEqual(links[1].deliveredTransactionIds, ["200"])
+
+        // Nothing changed: nothing sent. A new purchase goes with the consent.
+        await h.makeReporter().sync(.launch)
+        XCTAssertEqual(h.transport.bodies.filter { $0.originalTransactionIds != nil }.count, 2)
+        h.transactions.ids.withLock { $0.insert("300") }
+        await h.makeReporter().sync(.launch)
+        links = h.transport.bodies.filter { $0.originalTransactionIds != nil }
+        XCTAssertEqual(links.last?.originalTransactionIds, ["300"])
+        XCTAssertEqual(links.last?.refundDataConsent, true)
+        XCTAssertNil(links.last?.deliveredTransactionIds)
+
+        // Turned off: every purchase again, with false.
+        Reporter.setRefundConsent(false, store: h.store)
+        await h.makeReporter().sync(.launch)
+        links = h.transport.bodies.filter { $0.originalTransactionIds != nil }
+        XCTAssertEqual(links.last?.originalTransactionIds, ["100", "200", "300"])
+        XCTAssertEqual(links.last?.refundDataConsent, false)
+        XCTAssertNil(links.last?.deliveredTransactionIds)
+    }
+
     func testFailedBatchIsRetriedLater() async {
         let h = Harness()
         h.transactions.ids.withLock { $0 = ids(100) }

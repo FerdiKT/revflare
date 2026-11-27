@@ -9,6 +9,7 @@ import { defineDbFunction, type Db } from "./db";
 import { addDays, dayStart, keptShareSql } from "./money";
 import type { AttributionOptions, InstallSource, SdkEnvironment } from "../../shared/types";
 import { cachedFn } from "./metrics";
+import { recordRefundReport } from "./refunds";
 import { installsChanged, installsInSql, installSource, PRODUCTION_INSTALL, referrerSource, workspaceTestInstalls } from "./test-data";
 import { errorMessage, now } from "./util";
 
@@ -112,6 +113,10 @@ export interface SdkReport {
   purchaseTokens?: string[];
   /** Android: the Play Install Referrer (sent once). clickTs / installTs: seconds or milliseconds since epoch. */
   installReferrer?: { referrer: string; clickTs?: number | null; installTs?: number | null } | null;
+  /** RevflareKit 1.11+: the customer's answer in the app to sharing consumption data with Apple (refund requests), for originalTransactionIds. */
+  refundDataConsent?: boolean | null;
+  /** RevflareKit 1.11+: those of originalTransactionIds RevflareStore delivered (they gave access on the device). */
+  deliveredTransactionIds?: string[];
 }
 
 /** Parsed Play Install Referrer: utm parameters and gclid (each at most 200 characters). */
@@ -238,6 +243,12 @@ export const recordSdkReport = defineDbFunction("recordSdkReport", async (db, r:
     );
     // Revenue of these customers moves to their campaign: refresh the app's metrics cache (only when a link is new).
     if (results.some((x) => (x.meta?.changes ?? 0) > 0)) bumpVersion = true;
+    // Refund requests (worker/lib/refunds.ts): consent given in the app, purchases delivered. Apple only.
+    if (!android) {
+      const delivered = (r.deliveredTransactionIds ?? []).filter((x) => typeof x === "string").slice(0, 90);
+      const consent = typeof r.refundDataConsent === "boolean" ? r.refundDataConsent : null;
+      if (consent !== null || delivered.length) await recordRefundReport(db, app.id, installId, otids, consent, delivered, t);
+    }
   }
   const rawToken = typeof r.attributionToken === "string" && r.attributionToken.length > 10 && r.attributionToken.length < 4096 ? r.attributionToken : null;
   // Xcode builds get no usable token from AdServices: never sent to Apple.

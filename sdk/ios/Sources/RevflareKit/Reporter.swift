@@ -45,6 +45,11 @@ struct ReporterState: Codable, Equatable, Sendable {
     var pollCount: Int?
     /// When to ask the server again; nil when there is nothing more to learn.
     var nextPollAt: Date?
+    /// 1.11, refund requests: the consent answer the ids below were reported with, and those ids.
+    var refundConsentReported: Bool?
+    var refundConsentTransactionIds: Set<String>?
+    /// 1.11: delivered original transaction ids the server has accepted.
+    var deliveredReportedTransactionIds: Set<String>?
 }
 
 /// Why a sync runs.
@@ -96,6 +101,43 @@ actor Reporter {
     static func optIn(store: KeyValueStore, metaAnonymousId: String?) {
         if let metaAnonymousId { store.set(metaAnonymousId, forKey: metaAnonymousIdKey) }
         store.set("1", forKey: collectIdentifiersKey)
+    }
+
+    // MARK: Refund requests (1.11)
+
+    static let refundConsentKey = "app.revflare.kit.refundDataConsent"
+    static let deliveredKey = "app.revflare.kit.deliveredTransactions"
+    /// Delivered ids kept on the device at most (the newest).
+    static let maxDelivered = 500
+
+    /// The customer's answer (``Revflare/setRefundDataConsent(_:)``): nil when never answered.
+    static func refundConsent(store: KeyValueStore) -> Bool? {
+        switch store.string(forKey: refundConsentKey) {
+        case "1": return true
+        case "0": return false
+        default: return nil
+        }
+    }
+
+    static func setRefundConsent(_ consent: Bool, store: KeyValueStore) {
+        store.set(consent ? "1" : "0", forKey: refundConsentKey)
+    }
+
+    static func delivered(store: KeyValueStore) -> [String] {
+        guard let data = store.data(forKey: deliveredKey) else { return [] }
+        return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+    }
+
+    /// Adds original transaction ids RevflareStore delivered; true when one is new.
+    @discardableResult
+    static func noteDelivered(_ ids: Set<String>, store: KeyValueStore) -> Bool {
+        var list = delivered(store: store)
+        let new = ids.subtracting(list).sorted()
+        guard !new.isEmpty else { return false }
+        list.append(contentsOf: new)
+        if list.count > maxDelivered { list.removeFirst(list.count - maxDelivered) }
+        store.set(try? JSONEncoder().encode(list), forKey: deliveredKey)
+        return true
     }
 
     static func isOptedIn(store: KeyValueStore) -> Bool {
@@ -412,16 +454,33 @@ actor Reporter {
         let now = env.now()
         if let next = linkNextAttemptAt, next > now { return }
         let owned = await env.transactions.originalTransactionIds()
-        let unreported = owned.subtracting(state.reportedTransactionIds).sorted()
+        // Refund requests (1.11): every owned purchase goes again with a new consent answer; delivered ones once.
+        let consent = Self.refundConsent(store: env.store)
+        if consent != state.refundConsentReported {
+            state.refundConsentReported = consent
+            state.refundConsentTransactionIds = consent == nil ? nil : []
+        }
+        let delivered = Set(Self.delivered(store: env.store)).intersection(owned).subtracting(state.deliveredReportedTransactionIds ?? [])
+        var pending = owned.subtracting(state.reportedTransactionIds)
+        if consent != nil { pending.formUnion(owned.subtracting(state.refundConsentTransactionIds ?? [])) }
+        pending.formUnion(delivered)
+        let unreported = pending.sorted()
         guard !unreported.isEmpty else { return }
         Log.debug("Linking \(unreported.count) transaction(s)")
         for start in stride(from: 0, to: unreported.count, by: ReportClient.maxTransactionIdsPerReport) {
             let batch = Array(unreported[start..<min(start + ReportClient.maxTransactionIdsPerReport, unreported.count)])
-            let body = ReportBody(installId: installId.uuidString.lowercased(), originalTransactionIds: batch, appVersion: env.appVersion, installedAt: installedAt)
+            let batchDelivered = batch.filter { delivered.contains($0) }
+            var body = ReportBody(installId: installId.uuidString.lowercased(), originalTransactionIds: batch, appVersion: env.appVersion, installedAt: installedAt)
+            body.refundDataConsent = consent
+            body.deliveredTransactionIds = batchDelivered.isEmpty ? nil : batchDelivered
             let outcome = await client.send(body)
             switch outcome {
             case .accepted:
                 state.reportedTransactionIds.formUnion(batch)
+                if consent != nil { state.refundConsentTransactionIds = (state.refundConsentTransactionIds ?? []).union(batch) }
+                if !batchDelivered.isEmpty {
+                    state.deliveredReportedTransactionIds = (state.deliveredReportedTransactionIds ?? []).union(batchDelivered)
+                }
                 linkFailures = 0
                 linkNextAttemptAt = nil
                 save()

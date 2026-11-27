@@ -6,7 +6,7 @@ optional StoreKit 2 purchases / entitlements layer (`RevflareStore`) for apps th
 Add the package, call `Revflare.configure(sdkKey:server:)` once at launch with the app's SDK key and your Revflare
 server, and Revflare shows revenue per Apple Ads campaign, ad group and keyword (Revflare web → Apple Ads, `revflare` CLI, MCP `get_attributed_revenue`).
 
-Version **1.10.1** (`Revflare.version`). [Changes](#changes).
+Version **1.11.0** (`Revflare.version`). [Changes](#changes).
 
 - iOS 15+ (also builds for macOS 12+). No dependencies. No UI, no permission prompt.
 - Never blocks the main thread: everything runs in the background, in one actor.
@@ -114,14 +114,14 @@ GitHub account with access to it (Xcode → Settings → Accounts), and Xcode Cl
 repository.
 
 - **Xcode:** File → Add Package Dependencies… → `https://github.com/FerdiKT/RevflareKit` → Up to Next Major from
-  `1.10.1`, then add the `RevflareKit` library to the app target.
+  `1.11.0`, then add the `RevflareKit` library to the app target.
 - **XcodeGen** (`project.yml`):
 
   ```yaml
   packages:
     RevflareKit:
       url: https://github.com/FerdiKT/RevflareKit
-      from: 1.10.1
+      from: 1.11.0
   targets:
     MyApp:
       dependencies:
@@ -131,7 +131,7 @@ repository.
 - **Package.swift:**
 
   ```swift
-  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.10.1")
+  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.11.0")
   // target dependency: .product(name: "RevflareKit", package: "RevflareKit")
   ```
 
@@ -811,6 +811,34 @@ key), `.unknownSDKKey` (404), `.rateLimited(retryAfter:)` (429), `.network`, `.s
 **Privacy**: signing sends the install id, the product and offer ids and the `appAccountToken` to your Revflare
 server; nothing new for the App Store privacy answers. Win-back offers send nothing.
 
+## Refund requests: consent and delivery
+
+When a customer asks Apple for a refund, Revflare can answer Apple's consumption request for you (server side, off by
+default: Revflare's [refund requests guide](https://github.com/FerdiKT/revflare/blob/main/docs/refund-requests.md)).
+Apple accepts that information only with the customer's consent, and Revflare says the purchase was delivered only
+when RevflareKit saw it give access. Two things in the app (1.11+):
+
+1. **Consent**: an opt-in the customer controls, never pre-checked and separate from App Tracking Transparency, e.g. a
+   toggle in Settings, *"Share my purchase and usage information with Apple when I ask for a refund"*:
+
+   ```swift
+   Toggle("Share purchase info with Apple for refund requests", isOn: Binding(
+       get: { Revflare.refundDataConsent ?? false },
+       set: { Revflare.setRefundDataConsent($0) }
+   ))
+   ```
+
+   `Revflare.refundDataConsent` is `nil` until the customer answers (existing users too: they stay without consent).
+   The answer is kept on the device and reported with the purchases this device holds (later purchases too).
+   Turning it off is reported the same way: Revflare stops answering for them.
+2. **Delivery**: automatic with `RevflareStore`. After each refresh it reports the purchases that give the customer
+   access (an active entitlement; family-shared ones excluded). Purchases made through other SDKs, consumables and
+   purchases that never gave access on a device running 1.11 are not reported, and Revflare does not answer for them.
+
+Revflare's refund settings choose whose consent counts: customers who agreed in the app (default) or every customer
+(you attest you obtained consent another way). App Store privacy answers: declare the purchase / usage data shared
+with Apple for refund handling (*App Functionality*).
+
 ## Events and funnels
 
 Revflare shows **funnels** ("where do users drop off between onboarding, paywall and purchase?") from events
@@ -1222,6 +1250,7 @@ app (e.g. a debug screen showing `Revflare.installId`) into Revflare web → the
 | `Revflare.installId` | This install's UUID (available before `configure`). |
 | `Revflare.purchaseOptions` | `[.appAccountToken(Revflare.installId)]` for `Product.purchase(options:)`. |
 | `Revflare.syncPurchases()` | Optional: report new purchases now. |
+| `Revflare.setRefundDataConsent(_:)` / `Revflare.refundDataConsent` | 1.11: the customer's opt-in to share purchase and usage information with Apple for refund requests (`nil` = never answered). See [Refund requests](#refund-requests-consent-and-delivery). |
 | `Revflare.setMetaAnonymousID(_:)` | Opt-in, Meta Conversions API matching: pass `AppEvents.shared.anonymousID`. Kept in UserDefaults; reported to `POST /sdk/v1/identifiers` with the IDFV, ATT status, IDFA (when authorized) and device info whenever they change. Only after the user's consent. |
 | `Revflare.collectDeviceIdentifiers()` | Opt-in without a Facebook anonymous id (IDFV, IDFA when authorized, device info), and re-check now: call it again right after the ATT prompt. Only after the user's consent. |
 | `Revflare.configurePurchases(productIds:entitlements:nonRenewingDurations:)` | Creates the app's `RevflareStore` (kept in `Revflare.store`). Owns the app's transactions. `nonRenewingDurations` (1.9, optional): durations of non-renewing subscriptions, e.g. `["…pass_3day": .days(3)]` (needed for declared passes). |
@@ -1270,6 +1299,10 @@ install is organic).
 
 ## Changes
 
+- **1.11.0**: refund requests. `Revflare.setRefundDataConsent(_:)` / `Revflare.refundDataConsent` record the
+  customer's opt-in in the app, and `RevflareStore` reports the purchases that gave access (delivered); both go with
+  the install report (`refundDataConsent`, `deliveredTransactionIds`). Revflare (server 0.3.0+) answers Apple's refund
+  requests only for consenting customers and delivered purchases.
 - **1.10.1**: ships a privacy manifest (`PrivacyInfo.xcprivacy`: `UserDefaults` reason `CA92.1`; purchase history,
   device id (random install id) and product interaction, not linked, not tracking). No code change.
 - **1.10.0**: event names of `RevflareStore.restore()` (only matters to apps counting these events themselves): closing
