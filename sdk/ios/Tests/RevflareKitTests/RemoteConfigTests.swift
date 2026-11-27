@@ -192,7 +192,7 @@ final class RemoteConfigRequestTests: XCTestCase {
     }
 
     func testVersion() {
-        XCTAssertEqual(Revflare.version, "1.10.0")
+        XCTAssertEqual(Revflare.version, "1.10.1")
     }
 }
 

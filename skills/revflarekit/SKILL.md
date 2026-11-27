@@ -7,7 +7,7 @@ description: Integrate RevflareKit (the Revflare iOS SDK, Swift package in the R
 
 RevflareKit talks only to the user's own Revflare server. Source of truth for its API: `sdk/ios/README.md` in the
 Revflare repo (`/Volumes/KIOXIA/Projects/revflare` on the user's machine, or a clone of github.com/FerdiKT/revflare).
-Read it when something here is unclear; this skill is kept in sync with it (current version: **1.10.0**).
+Read it when something here is unclear; this skill is kept in sync with it (current version: **1.10.1**).
 
 Independent parts, pick what the app needs:
 
@@ -40,7 +40,7 @@ RevflareKit is its own Swift package: `https://github.com/FerdiKT/RevflareKit` (
 packages:
   RevflareKit:
     url: https://github.com/FerdiKT/RevflareKit
-    from: 1.10.0
+    from: 1.10.1
 targets:
   MyApp:
     dependencies:
@@ -324,6 +324,10 @@ Revflare.collectDeviceIdentifiers()   // also the opt-in for apps without the Fa
 
 ## 10. App Store privacy answers
 
+- Privacy manifest: RevflareKit 1.10.1+ ships its own `PrivacyInfo.xcprivacy` (UserDefaults `CA92.1`; Purchase History,
+  Device ID, Product Interaction, not linked, not tracking). Apps on an older version have no SDK manifest: update to
+  1.10.1 before an App Store submission and check the archive's privacy report (Xcode → Archive → Generate Privacy
+  Report). Apps using the Meta opt-ins declare that data in their own manifest.
 - Attribution / purchases only: data goes to the developer's own server for analytics, not tracking. If the app
   already declares Purchases → Purchase History for analytics, nothing new; otherwise Purchase History (+ Device ID if
   the install id is counted as one) for Analytics, not linked to tracking.

@@ -6,7 +6,7 @@ optional StoreKit 2 purchases / entitlements layer (`RevflareStore`) for apps th
 Add the package, call `Revflare.configure(sdkKey:server:)` once at launch with the app's SDK key and your Revflare
 server, and Revflare shows revenue per Apple Ads campaign, ad group and keyword (Revflare web → Apple Ads, `revflare` CLI, MCP `get_attributed_revenue`).
 
-Version **1.10.0** (`Revflare.version`). [Changes](#changes).
+Version **1.10.1** (`Revflare.version`). [Changes](#changes).
 
 - iOS 15+ (also builds for macOS 12+). No dependencies. No UI, no permission prompt.
 - Never blocks the main thread: everything runs in the background, in one actor.
@@ -98,6 +98,14 @@ The [events](#events-and-funnels) add **Usage Data → Product Interaction** for
 (unless the app turns them off).
 This changes if the app opts in to [Meta (Facebook) ads](#meta-facebook-ads): see its privacy notes.
 
+**Privacy manifest** (1.10.1): the package ships its own `PrivacyInfo.xcprivacy` (bundled as a resource, so it shows
+in Xcode's privacy report of the archive: *Product → Archive → Generate Privacy Report*). Required-reason API:
+`UserDefaults` (`CA92.1`, the SDK's own state). Collected data, not linked to the user's identity and not used for
+tracking: **Purchase History** (analytics, app functionality), **Device ID** (the random install id; analytics, app
+functionality), **Product Interaction** (events; analytics). `NSPrivacyTracking` is `false`. The Meta identifiers are
+opt-in and app-driven (`setMetaAnonymousID` / `collectDeviceIdentifiers`): an app using them declares that data
+(tracking, third-party advertising) in its own manifest and App Store label, see [Meta privacy](#privacy-1).
+
 ## Installation (Swift Package Manager)
 
 RevflareKit is published as its own Swift package, **https://github.com/FerdiKT/RevflareKit** (a read-only mirror of
@@ -106,14 +114,14 @@ GitHub account with access to it (Xcode → Settings → Accounts), and Xcode Cl
 repository.
 
 - **Xcode:** File → Add Package Dependencies… → `https://github.com/FerdiKT/RevflareKit` → Up to Next Major from
-  `1.10.0`, then add the `RevflareKit` library to the app target.
+  `1.10.1`, then add the `RevflareKit` library to the app target.
 - **XcodeGen** (`project.yml`):
 
   ```yaml
   packages:
     RevflareKit:
       url: https://github.com/FerdiKT/RevflareKit
-      from: 1.10.0
+      from: 1.10.1
   targets:
     MyApp:
       dependencies:
@@ -123,7 +131,7 @@ repository.
 - **Package.swift:**
 
   ```swift
-  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.10.0")
+  .package(url: "https://github.com/FerdiKT/RevflareKit", from: "1.10.1")
   // target dependency: .product(name: "RevflareKit", package: "RevflareKit")
   ```
 
@@ -1262,6 +1270,8 @@ install is organic).
 
 ## Changes
 
+- **1.10.1**: ships a privacy manifest (`PrivacyInfo.xcprivacy`: `UserDefaults` reason `CA92.1`; purchase history,
+  device id (random install id) and product interaction, not linked, not tracking). No code change.
 - **1.10.0**: event names of `RevflareStore.restore()` (only matters to apps counting these events themselves): closing
   Apple's sign-in sheet is now `restore_cancel` (was `restore_failed` with `error=user_cancelled`), and a restore that
   finds no purchase is `restore_nothing_found` (was `restore_success` with empty `entitlements`). `restore_success` now
