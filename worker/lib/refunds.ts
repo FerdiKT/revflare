@@ -15,12 +15,17 @@
 //
 // Settings per app (refund_settings), else the workspace defaults (refund_defaults), else off; turning it on needs the
 // developer's attestation that they obtained their customers' consent (Apple requires it; customerConsented is always
-// true when Revflare answers).
-// A customer can withdraw consent (customers.refund_data_consent = 0): their requests are skipped.
-// deliveryStatus is always DELIVERED (Revflare cannot know about delivery problems); consumptionPercentage is never
-// sent for auto-renewable subscriptions (Apple computes it from the elapsed time).
+// true when Revflare answers). Whose consent counts (consent_source):
+//   in_app (default): only customers who agreed in the app (RevflareKit Revflare.setRefundDataConsent(true), stored per
+//     original transaction in refund_consents); a customer who never answered is not asked about: no answer.
+//   attested: every customer, on the attestation that consent was obtained another way (e.g. the app's terms).
+// Either way a customer who said no in the app (refund_consents.consent = 0) or whose consent was withdrawn in Revflare
+// (customers.refund_data_consent = 0) is skipped.
+// deliveryStatus DELIVERED is sent only for purchases RevflareKit's RevflareStore reported as delivered (the purchase
+// gave access on the device: purchase_deliveries); others are not answered (Revflare cannot vouch for them).
+// consumptionPercentage is never sent for auto-renewable subscriptions (Apple computes it from the elapsed time).
 
-import type { RefundPolicy, RefundRequestDefaults, RefundRequestLogItem, RefundRequestSettings, RefundRequestSettingsUpdate } from "../../shared/types";
+import type { RefundConsentSource, RefundPolicy, RefundRequestDefaults, RefundRequestLogItem, RefundRequestSettings, RefundRequestSettingsUpdate } from "../../shared/types";
 import { AppStoreServerApi, AppleApiError, type ConsumptionRequestBody, type ServerEnvironment } from "../apple/api";
 import type { AppleEvent } from "../apple/types";
 import { raiseAlert, resolveAlerts } from "./alert-store";
@@ -48,10 +53,13 @@ export const REFUND_LOG_SIZE = 100;
 const RETENTION_MS = 180 * DAY;
 
 export const REFUND_POLICIES: RefundPolicy[] = ["none", "decline", "decline_if_delivered_after_days", "grant_prorated", "grant_full"];
+export const REFUND_CONSENT_SOURCES: RefundConsentSource[] = ["in_app", "attested"];
 
 export interface RefundConfig {
   enabled: boolean;
   consentAttested: boolean;
+  /** Whose consent counts: only customers who agreed in the app (in_app), or all (attested). */
+  consentSource: RefundConsentSource;
   policy: RefundPolicy;
   declineAfterDays: number | null;
   sampleContentProvided: boolean;
@@ -64,6 +72,7 @@ interface SettingsRow {
   enabled: number;
   consent_attested_at: number | null;
   consent_attested_by: string | null;
+  consent_source: string | null;
   policy: string;
   decline_after_days: number | null;
   sample_content_provided: number;
@@ -75,6 +84,7 @@ function configOf(row: Partial<SettingsRow> | null | undefined): RefundConfig {
   return {
     enabled: !!row?.enabled,
     consentAttested: !!row?.consent_attested_at,
+    consentSource: row?.consent_source === "attested" ? "attested" : "in_app",
     policy,
     declineAfterDays: row?.decline_after_days ?? null,
     sampleContentProvided: !!row?.sample_content_provided,
@@ -91,12 +101,28 @@ export type ConsumptionPlan = { action: "send"; body: ConsumptionRequestBody } |
  * What to do with a pending request now. `productType`: the ledger's (auto_renewable, consumable, ...); `startedAt`:
  * the purchase, or for a subscription its original purchase (the decline policy measures the age from there).
  */
-export function planConsumption(p: { config: RefundConfig; productType: string | null; startedAt: number | null; environment: string; customerConsent: boolean; now: number; dueAt: number }): ConsumptionPlan {
+export function planConsumption(p: {
+  config: RefundConfig;
+  productType: string | null;
+  startedAt: number | null;
+  environment: string;
+  /** false: withdrawn in Revflare (customers.refund_data_consent = 0). */
+  customerConsent: boolean;
+  /** The customer's answer in the app (refund_consents): true, false, or null (never asked / never answered). */
+  inAppConsent: boolean | null;
+  /** RevflareStore reported the purchase as delivered (purchase_deliveries). */
+  delivered: boolean;
+  now: number;
+  dueAt: number;
+}): ConsumptionPlan {
   const c = p.config;
   if (p.environment !== "Production" && p.environment !== "Sandbox") return { action: "skip", reason: `${p.environment} environment: Apple's server does not take answers for it`, alert: false };
   if (!c.enabled) return { action: "skip", reason: "Answering refund requests is off for this app", alert: p.environment === "Production" };
   if (!c.consentAttested) return { action: "skip", reason: "Customer consent not confirmed in the app's refund request settings", alert: p.environment === "Production" };
-  if (!p.customerConsent) return { action: "skip", reason: "The customer withdrew their consent to share consumption data with Apple", alert: false };
+  if (!p.customerConsent || p.inAppConsent === false) return { action: "skip", reason: "The customer withdrew their consent to share consumption data with Apple", alert: false };
+  if (c.consentSource === "in_app" && p.inAppConsent !== true)
+    return { action: "skip", reason: "No consent from this customer in the app (RevflareKit: Revflare.setRefundDataConsent(true)); nothing is sent without it", alert: false };
+  if (!p.delivered) return { action: "skip", reason: "Delivery not confirmed: RevflareKit's RevflareStore never reported this purchase as giving access, so DELIVERED is not sent", alert: false };
   if (p.now >= p.dueAt) return { action: "expire", reason: "Apple's 12-hour window has passed" };
   const auto = p.productType === "auto_renewable";
   const body: ConsumptionRequestBody = { customerConsented: true, deliveryStatus: "DELIVERED", sampleContentProvided: c.sampleContentProvided };
@@ -162,6 +188,7 @@ type DueRow = {
   id: number;
   app_id: string;
   transaction_id: string;
+  original_transaction_id: string | null;
   product_id: string | null;
   product_type: string | null;
   started_at: number | null;
@@ -172,10 +199,13 @@ type DueRow = {
   app_name: string;
   bundle_id: string | null;
   customer_consent: number | null;
+  in_app_consent: number | null;
+  delivered: number;
   /** Set when the app has its own settings row; else the d_ columns (workspace defaults) apply. */
   s_app: string | null;
   d_enabled: number | null;
   d_consent_attested_at: number | null;
+  d_consent_source: string | null;
   d_policy: string | null;
   d_decline_after_days: number | null;
   d_sample_content_provided: number | null;
@@ -188,6 +218,7 @@ function rowConfig(r: DueRow): RefundConfig {
   return configOf({
     enabled: r.d_enabled ?? 0,
     consent_attested_at: r.d_consent_attested_at,
+    consent_source: r.d_consent_source,
     policy: r.d_policy ?? "none",
     decline_after_days: r.d_decline_after_days,
     sample_content_provided: r.d_sample_content_provided ?? 0,
@@ -219,11 +250,13 @@ export const sendConsumptionInfo = defineDbFunction(
     if (!args.appId) await db.prepare("DELETE FROM consumption_requests WHERE received_at < ? AND status != 'pending'").bind(t - RETENTION_MS).run();
     const { results: rows } = await db
       .prepare(
-        `SELECT r.id, r.app_id, r.transaction_id, r.product_id, r.product_type, r.started_at, r.environment, r.due_at, r.attempts, a.workspace_id, a.name AS app_name, a.bundle_id,
-           s.app_id AS s_app, s.enabled, s.consent_attested_at, s.policy, s.decline_after_days, s.sample_content_provided, s.consumption_percent,
-           d.enabled AS d_enabled, d.consent_attested_at AS d_consent_attested_at, d.policy AS d_policy, d.decline_after_days AS d_decline_after_days,
+        `SELECT r.id, r.app_id, r.transaction_id, r.original_transaction_id, r.product_id, r.product_type, r.started_at, r.environment, r.due_at, r.attempts, a.workspace_id, a.name AS app_name, a.bundle_id,
+           s.app_id AS s_app, s.enabled, s.consent_attested_at, s.consent_source, s.policy, s.decline_after_days, s.sample_content_provided, s.consumption_percent,
+           d.enabled AS d_enabled, d.consent_attested_at AS d_consent_attested_at, d.consent_source AS d_consent_source, d.policy AS d_policy, d.decline_after_days AS d_decline_after_days,
            d.sample_content_provided AS d_sample_content_provided, d.consumption_percent AS d_consumption_percent,
-           (SELECT c.refund_data_consent FROM transactions x JOIN customers c ON c.id = x.customer_id WHERE x.app_id = r.app_id AND x.transaction_id = r.transaction_id) AS customer_consent
+           (SELECT c.refund_data_consent FROM transactions x JOIN customers c ON c.id = x.customer_id WHERE x.app_id = r.app_id AND x.transaction_id = r.transaction_id) AS customer_consent,
+           (SELECT k.consent FROM refund_consents k WHERE k.app_id = r.app_id AND k.original_transaction_id = r.original_transaction_id) AS in_app_consent,
+           EXISTS (SELECT 1 FROM purchase_deliveries v WHERE v.app_id = r.app_id AND v.original_transaction_id = r.original_transaction_id) AS delivered
          FROM consumption_requests r JOIN apps a ON a.id = r.app_id LEFT JOIN refund_settings s ON s.app_id = r.app_id LEFT JOIN refund_defaults d ON d.workspace_id = a.workspace_id
          WHERE r.status = 'pending' AND r.next_attempt_at <= ?${args.appId ? " AND r.app_id = ?" : ""} ORDER BY r.next_attempt_at LIMIT ?`,
       )
@@ -286,6 +319,8 @@ export const sendConsumptionInfo = defineDbFunction(
         startedAt: r.started_at,
         environment: r.environment,
         customerConsent: r.customer_consent !== 0,
+        inAppConsent: r.in_app_consent === null || r.in_app_consent === undefined ? null : r.in_app_consent === 1,
+        delivered: !!r.delivered,
         now: t,
         dueAt: r.due_at,
       });
@@ -432,11 +467,12 @@ export async function refundSettingsView(db: Db, appId: string): Promise<RefundR
     consentAttested: c.consentAttested,
     consentAttestedAt: row?.consent_attested_at ?? null,
     consentAttestedBy: row?.consent_attested_by ?? null,
+    consentSource: c.consentSource,
     refundPolicy: c.policy,
     declineAfterDays: c.declineAfterDays,
     sampleContentProvided: c.sampleContentProvided,
     consumptionPercent: c.consumptionPercent,
-    deliveryStatus: "DELIVERED",
+    deliveryStatus: "DELIVERED_IF_CONFIRMED",
     notifications: { status: app?.notification_url_status ?? "unknown", forwarded: !!app?.forward_url, lastNotificationAt: app?.last_notification_at ?? null },
     stats,
     lastSentAt,
@@ -451,6 +487,10 @@ export function parseRefundUpdate(body: Record<string, unknown>): RefundRequestS
     if (body[k] === undefined) continue;
     if (typeof body[k] !== "boolean") return { error: `${k} must be true or false` };
     out[k] = body[k];
+  }
+  if (body.consentSource !== undefined) {
+    if (typeof body.consentSource !== "string" || !(REFUND_CONSENT_SOURCES as string[]).includes(body.consentSource)) return { error: `consentSource must be one of ${REFUND_CONSENT_SOURCES.join(", ")}` };
+    out.consentSource = body.consentSource as RefundConsentSource;
   }
   if (body.refundPolicy !== undefined) {
     if (typeof body.refundPolicy !== "string" || !(REFUND_POLICIES as string[]).includes(body.refundPolicy)) return { error: `refundPolicy must be one of ${REFUND_POLICIES.join(", ")}` };
@@ -509,9 +549,10 @@ export async function saveRefundSettings(
   const [table, key] = "appId" in target ? ["refund_settings", "app_id"] : ["refund_defaults", "workspace_id"];
   await db
     .prepare(
-      `INSERT INTO ${table} (${key}, enabled, consent_attested_at, consent_attested_by, policy, decline_after_days, sample_content_provided, consumption_percent, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO ${table} (${key}, enabled, consent_attested_at, consent_attested_by, consent_source, policy, decline_after_days, sample_content_provided, consumption_percent, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(${key}) DO UPDATE SET enabled = excluded.enabled, consent_attested_at = excluded.consent_attested_at, consent_attested_by = excluded.consent_attested_by,
+         consent_source = excluded.consent_source,
          policy = excluded.policy, decline_after_days = excluded.decline_after_days, sample_content_provided = excluded.sample_content_provided,
          consumption_percent = excluded.consumption_percent, updated_at = excluded.updated_at`,
     )
@@ -520,6 +561,7 @@ export async function saveRefundSettings(
       enabled ? 1 : 0,
       attestedAt,
       attestedBy,
+      u.consentSource ?? c.consentSource,
       policy,
       days ?? null,
       (u.sampleContentProvided ?? c.sampleContentProvided) ? 1 : 0,
@@ -549,6 +591,7 @@ export async function refundDefaultsView(db: Db, workspaceId: string): Promise<R
     consentAttested: c.consentAttested,
     consentAttestedAt: row?.consent_attested_at ?? null,
     consentAttestedBy: row?.consent_attested_by ?? null,
+    consentSource: c.consentSource,
     refundPolicy: c.policy,
     declineAfterDays: c.declineAfterDays,
     sampleContentProvided: c.sampleContentProvided,
@@ -600,6 +643,29 @@ export async function refundRequestLog(db: Db, appId: string, limit = REFUND_LOG
     reason: r.reason,
     updatedAt: r.updated_at,
   }));
+}
+
+/**
+ * The install report's refund fields (RevflareKit 1.11+): the customer's answer in the app for the original
+ * transactions the device holds, and the ones RevflareStore delivered (a subset of them). Writes only changes.
+ */
+export async function recordRefundReport(db: Db, appId: string, installId: string, otids: string[], consent: boolean | null, delivered: string[], at: number) {
+  const stmts = [];
+  if (consent !== null)
+    for (const o of otids)
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO refund_consents (app_id, original_transaction_id, install_id, consent, updated_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(app_id, original_transaction_id) DO UPDATE SET consent = excluded.consent, install_id = excluded.install_id, updated_at = excluded.updated_at
+             WHERE refund_consents.consent != excluded.consent`,
+          )
+          .bind(appId, o, installId, consent ? 1 : 0, at),
+      );
+  const owned = new Set(otids);
+  for (const o of delivered)
+    if (owned.has(o)) stmts.push(db.prepare("INSERT INTO purchase_deliveries (app_id, original_transaction_id, install_id, delivered_at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING").bind(appId, o, installId, at));
+  if (stmts.length) await db.batch(stmts);
 }
 
 /** PUT /customers/:id/refund-consent. Returns false when the customer is not in the workspace. */

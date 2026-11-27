@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { ArrowLeft, ListChecks, RefreshCw, Save, TriangleAlert } from "lucide-react";
-import type { RefundPolicy, RefundRequestLogItem, RefundRequestSettings, RefundRequestSettingsUpdate } from "@shared/types";
+import type { RefundConsentSource, RefundPolicy, RefundRequestLogItem, RefundRequestSettings, RefundRequestSettingsUpdate } from "@shared/types";
 import { AppIcon } from "../components/Logo";
 import { AppleOnlyNotice, isAndroid } from "../components/Platform";
 import { Button } from "../components/ui/Button";
@@ -124,7 +124,7 @@ export function RefundRequestsPage() {
       {s.lastError && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900">Last error: {s.lastError}</p>}
 
       <SettingsForm
-        key={JSON.stringify([s.enabled, s.consentAttested, s.refundPolicy, s.declineAfterDays, s.sampleContentProvided, s.consumptionPercent])}
+        key={JSON.stringify([s.enabled, s.consentAttested, s.consentSource, s.refundPolicy, s.declineAfterDays, s.sampleContentProvided, s.consumptionPercent])}
         s={s}
         manage={manage}
         busy={busy}
@@ -198,6 +198,7 @@ export function RefundRequestsPage() {
 function SettingsForm({ s, manage, busy, save }: { s: RefundRequestSettings; manage: boolean; busy: boolean; save: (b: RefundRequestSettingsUpdate) => void }) {
   const [enabled, setEnabled] = useState(s.enabled);
   const [attested, setAttested] = useState(s.consentAttested);
+  const [consentSource, setConsentSource] = useState<RefundConsentSource>(s.consentSource ?? "in_app");
   const [policy, setPolicy] = useState<RefundPolicy>(s.refundPolicy);
   const [days, setDays] = useState(s.declineAfterDays ? String(s.declineAfterDays) : "30");
   const [sample, setSample] = useState(s.sampleContentProvided);
@@ -209,13 +210,17 @@ function SettingsForm({ s, manage, busy, save }: { s: RefundRequestSettings; man
 
   return (
     <Card className="mt-5">
-      <CardHeader title="Settings" description="Revflare always answers with deliveryStatus DELIVERED (it cannot know about delivery problems) and customerConsented true." />
+      <CardHeader
+        title="Settings"
+        description="Revflare answers only for customers whose consent counts (below) and only for purchases RevflareKit's RevflareStore reported as delivered (deliveryStatus DELIVERED, RevflareKit 1.11+); other requests are not answered."
+      />
       <form
         className="space-y-5 px-5 pb-5"
         onSubmit={(e) => {
           e.preventDefault();
           save({
             consentAttested: attested,
+            consentSource,
             enabled: attested && enabled,
             refundPolicy: policy,
             ...(policy === "decline_if_delivered_after_days" ? { declineAfterDays: daysN } : {}),
@@ -240,6 +245,21 @@ function SettingsForm({ s, manage, busy, save }: { s: RefundRequestSettings; man
             </span>
           </span>
         </label>
+        <Field
+          label="Whose consent counts"
+          help={
+            consentSource === "in_app"
+              ? "Only customers who agreed in the app (RevflareKit 1.11+: Revflare.setRefundDataConsent(true), e.g. an opt-in toggle in Settings they can turn off). Customers who never answered get no answer. Recommended."
+              : "Every customer, on your attestation that consent was obtained another way (e.g. your terms). Customers who said no in the app or were withdrawn on their customer page are still skipped."
+          }
+        >
+          {(fid) => (
+            <Select id={fid} value={consentSource} disabled={!manage} onChange={(e) => setConsentSource(e.target.value as RefundConsentSource)}>
+              <option value="in_app">Customers who agreed in the app</option>
+              <option value="attested">Every customer (attested)</option>
+            </Select>
+          )}
+        </Field>
         <label className="flex items-center justify-between gap-4 rounded-xl bg-zinc-50 px-4 py-3 ring-1 ring-zinc-200 dark:bg-zinc-800/40 dark:ring-zinc-700">
           <span>
             <span className="block text-sm font-medium">Answer refund requests</span>

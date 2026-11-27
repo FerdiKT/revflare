@@ -32,7 +32,7 @@ import StoreKit
 /// (country, app version, language, percentage rollout...), cached on the device. Replaces Firebase Remote Config.
 public enum Revflare {
     /// The library version (sent in the `User-Agent`).
-    public static let version = "1.10.1"
+    public static let version = "1.11.0"
 
     private struct Runtime: @unchecked Sendable {
         let reporter: Reporter
@@ -385,6 +385,32 @@ public enum Revflare {
     }
 
     private static let defaults = UserDefaultsStore()
+
+    // MARK: Refund requests
+
+    /// The customer's answer to sharing purchase and usage information with Apple when they ask Apple for a refund
+    /// (``setRefundDataConsent(_:)``); nil when they never answered.
+    public static var refundDataConsent: Bool? { Reporter.refundConsent(store: defaults) }
+
+    /// Records the customer's choice to share their purchase and usage information with Apple when they ask Apple
+    /// for a refund (Apple uses it to decide the refund). Call it from an opt-in the customer controls, e.g. a toggle
+    /// in the app's Settings they can turn off again; never pre-checked, and not the App Tracking Transparency prompt.
+    ///
+    /// Revflare answers Apple's refund requests (Send Consumption Information) only for customers who agreed here
+    /// (the app's refund settings in Revflare, consent source "in app"), and never for one who turned it off. The
+    /// answer is kept on the device and reported with the purchases this device holds (also later purchases), so it
+    /// covers the customer's purchases seen on this device. Can be called before or after ``configure(sdkKey:server:)``.
+    public static func setRefundDataConsent(_ consent: Bool) {
+        Reporter.setRefundConsent(consent, store: defaults)
+        syncPurchases()
+    }
+
+    /// RevflareStore delivered these purchases (they gave access on the device): Revflare may answer Apple's refund
+    /// requests for them with `deliveryStatus` DELIVERED.
+    static func noteDelivered(_ originalTransactionIds: Set<String>) {
+        guard !originalTransactionIds.isEmpty, Reporter.noteDelivered(originalTransactionIds, store: defaults) else { return }
+        syncPurchases()
+    }
 
     // MARK: Events
 

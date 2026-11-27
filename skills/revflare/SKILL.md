@@ -77,7 +77,7 @@ revflare meta <app> set [--dataset-id ID] [--token -] [--test-code CODE] [--enab
 revflare meta <app> test | backfill                # one test event (needs the test code) | queue the last 7 days again
 revflare refunds <app>                             # Apple refund requests: settings, consent attestation, answered / skipped / failed / expired
 revflare refunds <app> log [--limit 30]            # last requests: Apple's HTTP status (202 = accepted), the preference sent, skip reason
-revflare refunds <app> set [--attest-consent] [--enable|--disable] [--policy none|decline-after|prorated|full] [--days N] [--sample on|off] [--consumed PCT|none]
+revflare refunds <app> set [--attest-consent] [--consent-source in-app|attested] [--enable|--disable] [--policy none|decline-after|prorated|full] [--days N] [--sample on|off] [--consumed PCT|none]
 revflare refunds <app> consent <customer-id> on|off   # a customer withdraws (off) / restores consent: their requests are skipped
 revflare offers <app>                              # promotional offers RevflareKit may get signed (allowlist), strict mode, key / bundle id status
 revflare offers <app> add <product> <offer> [--label T] [--win-back] | remove <product> <offer> | set --strict on|off | import
@@ -183,7 +183,10 @@ again (sent events are never sent twice).
 
 Refund requests: when a customer asks Apple for a refund, Apple sends a CONSUMPTION_REQUEST and accepts consumption
 information for 12 hours. Revflare answers (off by default) with `customerConsented: true`, `deliveryStatus: DELIVERED`
-(it cannot know about delivery problems), `sampleContentProvided`, an optional consumed percentage (never for
+(only for purchases RevflareKit 1.11+ `RevflareStore` reported as delivered; others are skipped "Delivery not
+confirmed"), only for customers whose consent counts (`--consent-source in-app`, the default: customers who agreed in
+the app through `Revflare.setRefundDataConsent(true)`, others skipped "No consent from this customer in the app";
+`attested`: every customer who did not say no), `sampleContentProvided`, an optional consumed percentage (never for
 auto-renewable subscriptions) and the app's refund preference: `none` (default, Apple decides), `decline` (DECLINE at
 any age), `decline-after` N days
 (DECLINE when the purchase, or the subscription's first purchase, is at least N days old), `prorated`, `full`.

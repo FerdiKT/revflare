@@ -7,10 +7,10 @@ import type { TransactionInfo } from "../worker/apple/types";
 
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-06-15T12:00:00Z");
-const on: RefundConfig = { enabled: true, consentAttested: true, policy: "none", declineAfterDays: null, sampleContentProvided: false, consumptionPercent: null };
+const on: RefundConfig = { enabled: true, consentAttested: true, consentSource: "in_app", policy: "none", declineAfterDays: null, sampleContentProvided: false, consumptionPercent: null };
 type PlanInput = Parameters<typeof planConsumption>[0];
 const plan = (o: Partial<Omit<PlanInput, "config">> & { config?: Partial<RefundConfig> }) =>
-  planConsumption({ productType: "auto_renewable", startedAt: NOW - 10 * DAY, environment: "Production", customerConsent: true, now: NOW, dueAt: NOW + 3_600_000, ...o, config: { ...on, ...o.config } });
+  planConsumption({ productType: "auto_renewable", startedAt: NOW - 10 * DAY, environment: "Production", customerConsent: true, inAppConsent: true, delivered: true, now: NOW, dueAt: NOW + 3_600_000, ...o, config: { ...on, ...o.config } });
 
 describe("planConsumption", () => {
   it("skips without the switch, the attestation or the customer's consent, and expires after the window", () => {
@@ -21,6 +21,19 @@ describe("planConsumption", () => {
     expect(plan({ customerConsent: false })).toMatchObject({ action: "skip", reason: expect.stringContaining("withdrew"), alert: false });
     expect(plan({ environment: "Xcode", config: { enabled: false } })).toMatchObject({ action: "skip", alert: false });
     expect(plan({ dueAt: NOW })).toMatchObject({ action: "expire" });
+  });
+
+  it("needs the customer's consent in the app (in_app) and a delivery RevflareStore confirmed", () => {
+    // in_app (default): a customer who never answered in the app gets no answer; one who said no neither.
+    expect(plan({ inAppConsent: null })).toMatchObject({ action: "skip", reason: expect.stringContaining("No consent from this customer in the app"), alert: false });
+    expect(plan({ inAppConsent: false })).toMatchObject({ action: "skip", reason: expect.stringContaining("withdrew"), alert: false });
+    // attested: every customer, except one who said no in the app or was withdrawn in Revflare.
+    expect(plan({ inAppConsent: null, config: { consentSource: "attested" } })).toMatchObject({ action: "send" });
+    expect(plan({ inAppConsent: false, config: { consentSource: "attested" } })).toMatchObject({ action: "skip", reason: expect.stringContaining("withdrew") });
+    expect(plan({ customerConsent: false, config: { consentSource: "attested" } })).toMatchObject({ action: "skip", reason: expect.stringContaining("withdrew") });
+    // DELIVERED only for a delivery RevflareKit reported.
+    expect(plan({ delivered: false })).toMatchObject({ action: "skip", reason: expect.stringContaining("Delivery not confirmed"), alert: false });
+    expect(plan({ delivered: false, config: { consentSource: "attested" } })).toMatchObject({ action: "skip", reason: expect.stringContaining("Delivery not confirmed") });
   });
 
   it("builds the v2 body: DELIVERED, no percentage for auto-renewable subscriptions", () => {
@@ -51,6 +64,8 @@ describe("planConsumption", () => {
     expect(parseRefundUpdate({ declineAfterDays: 0 })).toHaveProperty("error");
     expect(parseRefundUpdate({ consumptionPercent: -1 })).toHaveProperty("error");
     expect(parseRefundUpdate({ refundPolicy: "decline" })).toEqual({ refundPolicy: "decline" });
+    expect(parseRefundUpdate({ consentSource: "everyone" })).toHaveProperty("error");
+    expect(parseRefundUpdate({ consentSource: "attested" })).toEqual({ consentSource: "attested" });
     expect(parseRefundUpdate({ refundPolicy: "grant_full", declineAfterDays: null, consumptionPercent: 12.5 })).toEqual({ refundPolicy: "grant_full", declineAfterDays: null, consumptionPercent: 12.5 });
   });
 });

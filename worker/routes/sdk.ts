@@ -34,6 +34,8 @@ sdkRoutes.post("/report", async (c) => {
     orderIds: Array.isArray(body.orderIds) ? body.orderIds.slice(0, 200).map(String) : [],
     purchaseTokens: Array.isArray(body.purchaseTokens) ? body.purchaseTokens.slice(0, 90).map(String) : [],
     installReferrer: body.installReferrer && typeof body.installReferrer === "object" ? (body.installReferrer as { referrer: string }) : null,
+    refundDataConsent: typeof body.refundDataConsent === "boolean" ? body.refundDataConsent : null,
+    deliveredTransactionIds: Array.isArray(body.deliveredTransactionIds) ? body.deliveredTransactionIds.slice(0, 90).map(String) : [],
   });
   if (r.status !== 200) return c.json({ error: r.error }, r.status as 400 | 404);
   return c.json({

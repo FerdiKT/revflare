@@ -50,7 +50,23 @@ async function setup(name: string, opts: { iapKey?: boolean } = {}) {
 async function createApp(client: Client, name: string, bundleId: string) {
   const app = await call(client, "/api/v1/apps", { body: { name, bundleId } });
   expect(app.status).toBe(201);
-  return { id: app.json.id as string, key: (app.json.revflareNotificationUrl as string).split("/").pop()! };
+  return { id: app.json.id as string, key: (app.json.revflareNotificationUrl as string).split("/").pop()!, sdkKey: app.json.sdkKey as string };
+}
+
+/** The install report of RevflareKit 1.11+: the customer's answer in the app and the purchases RevflareStore delivered. */
+async function sdkReport(sdkKey: string, body: { originalTransactionIds: string[]; refundDataConsent?: boolean; deliveredTransactionIds?: string[] }, installId = "5a5a5a5a-0000-4000-8000-000000000001") {
+  const r = await call(null, "/sdk/v1/report", { body: { installId, ...body }, headers: { "x-revflare-key": sdkKey } });
+  expect(r.status, r.text).toBe(200);
+}
+
+/** Consent given in the app and delivery confirmed for these purchases (as RevflareKit reports them). */
+async function confirmed(appId: string, otids: string[]) {
+  const db = getDb(env);
+  const t = Date.now();
+  for (const o of otids) {
+    await db.prepare("INSERT OR REPLACE INTO refund_consents (app_id, original_transaction_id, install_id, consent, updated_at) VALUES (?, ?, 'test', 1, ?)").bind(appId, o, t).run();
+    await db.prepare("INSERT OR IGNORE INTO purchase_deliveries (app_id, original_transaction_id, install_id, delivered_at) VALUES (?, ?, 'test', ?)").bind(appId, o, t).run();
+  }
 }
 
 const post = (key: string, signedPayload: string) => call(null, `/apple/notifications/${key}`, { body: { signedPayload } });
@@ -75,12 +91,13 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     const client = await setup("Refunds");
     const bundleId = "com.example.refunds";
     const app = await createApp(client, "Refunds", bundleId);
+    await confirmed(app.id, ["8400"]);
     const url = `/api/v1/apps/${app.id}/integrations/refunds`;
     const put = (body: object) => call(client, url, { method: "PUT", body });
 
     // Defaults and validation: off, no attestation; turning on needs the attestation.
     const initial = await call(client, url);
-    expect(initial.json).toMatchObject({ enabled: false, consentAttested: false, refundPolicy: "none", sampleContentProvided: false, consumptionPercent: null, deliveryStatus: "DELIVERED", stats: { pending: 0, sent: 0, skipped: 0, failed: 0, expired: 0 } });
+    expect(initial.json).toMatchObject({ enabled: false, consentAttested: false, refundPolicy: "none", sampleContentProvided: false, consumptionPercent: null, consentSource: "in_app", deliveryStatus: "DELIVERED_IF_CONFIRMED", stats: { pending: 0, sent: 0, skipped: 0, failed: 0, expired: 0 } });
     expect((await put({ enabled: true })).status).toBe(400);
     expect((await put({ refundPolicy: "maybe" })).status).toBe(400);
     expect((await put({ consumptionPercent: 120 })).status).toBe(400);
@@ -89,6 +106,11 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     expect(saved.status).toBe(200);
     expect(saved.json).toMatchObject({ enabled: true, consentAttested: true, consentAttestedBy: "Owner <owner@rf.test>", refundPolicy: "decline_if_delivered_after_days", declineAfterDays: 30, consumptionPercent: 50 });
     expect(saved.json.consentAttestedAt).toBeGreaterThan(0);
+    // RevflareKit reported the customer's consent and the deliveries (8200 and 8300 from a second device).
+    await sdkReport(app.sdkKey, { originalTransactionIds: ["8100"], refundDataConsent: true, deliveredTransactionIds: ["8100", "9999"] });
+    await sdkReport(app.sdkKey, { originalTransactionIds: ["8200", "8300", "8600"], refundDataConsent: true, deliveredTransactionIds: ["8200", "8300"] }, "5a5a5a5a-0000-4000-8000-000000000002");
+    // A delivery not among the device's purchases is ignored.
+    expect((await getDb(env).prepare("SELECT COUNT(*) AS n FROM purchase_deliveries WHERE app_id = ? AND original_transaction_id = '9999'").bind(app.id).first<{ n: number }>())?.n).toBe(0);
 
     // 1. A subscription started 60 days ago: DECLINE, and no consumptionPercentage (auto-renewable).
     const sent: Sent[] = [];
@@ -129,10 +151,34 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     expect((await call(client, `/api/v1/customers/${customerId}/refund-consent`, { method: "PUT", body: { consent: "no" } })).status).toBe(400);
     expect((await call(client, `/api/v1/customers/cus_unknown/refund-consent`, { method: "PUT", body: { consent: false } })).status).toBe(404);
     expect((await call(client, `/api/v1/customers/${customerId}/refund-consent`, { method: "PUT", body: { consent: false } })).json).toEqual({ id: customerId, refundDataConsent: false });
+    // The customer view also reads the linked install's recent events from Analytics Engine: answer it (no events).
+    fetchMock
+      .get("https://api.cloudflare.com")
+      .intercept({ path: `/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`, method: "POST" })
+      .reply(200, JSON.stringify({ meta: [], data: [], rows: 0 }))
+      .persist();
     expect((await call(client, `/api/v1/customers/${customerId}`)).json.refundDataConsent).toBe(false);
     const renewal: TxOptions = { ...sub, transactionId: "8101", originalTransactionId: "8100", purchaseDate: Date.now() - 30 * DAY, transactionReason: "RENEWAL" };
     expect((await post(app.key, (await request(renewal)).signedPayload)).status).toBe(200);
     expect(await logRow(client, app.id, "8101", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("withdrew"), httpStatus: null, request: null });
+
+    // 4b. No answer in the app: skipped; consent but delivery not confirmed (8600): skipped; "no" in the app: skipped.
+    const noConsent: TxOptions = { ...consumable, transactionId: "8550", environment: "Production" };
+    expect((await post(app.key, (await request(noConsent)).signedPayload)).status).toBe(200);
+    expect(await logRow(client, app.id, "8550", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("No consent from this customer in the app"), request: null });
+    const undelivered: TxOptions = { ...consumable, transactionId: "8600", environment: "Production" };
+    expect((await post(app.key, (await request(undelivered)).signedPayload)).status).toBe(200);
+    expect(await logRow(client, app.id, "8600", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("Delivery not confirmed"), request: null });
+    await sdkReport(app.sdkKey, { originalTransactionIds: ["8200"], refundDataConsent: false }, "5a5a5a5a-0000-4000-8000-000000000002");
+    const said: TxOptions = { ...consumable, transactionId: "8201", originalTransactionId: "8200", environment: "Production" };
+    expect((await post(app.key, (await request(said)).signedPayload)).status).toBe(200);
+    expect(await logRow(client, app.id, "8201", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("withdrew") });
+    // attested: every customer who did not say no counts, delivery is still needed.
+    expect((await put({ consentSource: "attested" })).json).toMatchObject({ consentSource: "attested" });
+    const attested: TxOptions = { ...consumable, transactionId: "8650", environment: "Production" };
+    expect((await post(app.key, (await request(attested)).signedPayload)).status).toBe(200);
+    expect(await logRow(client, app.id, "8650", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("Delivery not confirmed") });
+    expect((await put({ consentSource: "in_app" })).status).toBe(200);
 
     // 5. Older than Apple's 12 hours: expired.
     const late: TxOptions = { ...consumable, transactionId: "8400", environment: "Production" };
@@ -147,7 +193,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     expect(await logRow(client, app.id, "8500", (r) => r.status !== "pending")).toMatchObject({ status: "skipped", reason: expect.stringContaining("off") });
 
     const status = (await call(client, url)).json;
-    expect(status.stats).toEqual({ pending: 0, sent: 3, skipped: 2, failed: 0, expired: 1 });
+    expect(status.stats).toEqual({ pending: 0, sent: 3, skipped: 6, failed: 0, expired: 1 });
     expect(status.notifications).toMatchObject({ status: "revflare", forwarded: false });
     const log = (await call(client, `${url}/log?limit=2`)).json.items as any[];
     expect(log.map((r) => r.transactionId)).toEqual(["8500", "8400"]);
@@ -157,6 +203,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     const client = await setup("Refunds no key", { iapKey: false });
     const bundleId = "com.example.refunds.nokey";
     const app = await createApp(client, "No key", bundleId);
+    await confirmed(app.id, ["9100", "9200"]);
     expect((await call(client, `/api/v1/apps/${app.id}/integrations/refunds`, { method: "PUT", body: { consentAttested: true, enabled: true, refundPolicy: "grant_full" } })).status).toBe(200);
     const product: TxOptions = { bundleId, transactionId: "9100", type: "Non-Consumable", productId: "pro", purchaseDate: Date.now() - DAY, price: 1990 };
 
@@ -193,6 +240,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     // Missing key and Apple's deadline before the next try: expired, with the cause.
     const late = await setup("Refunds no key late", { iapKey: false });
     const lateApp = await createApp(late, "No key late", "com.example.refunds.nokey.late");
+    await confirmed(lateApp.id, ["9300"]);
     expect((await call(late, `/api/v1/apps/${lateApp.id}/integrations/refunds`, { method: "PUT", body: { consentAttested: true, enabled: true } })).status).toBe(200);
     const n = await request({ ...product, bundleId: "com.example.refunds.nokey.late", transactionId: "9300" }, { signedDate: Date.now() - 12 * 3_600_000 + 30_000 });
     expect((await post(lateApp.key, n.signedPayload)).status).toBe(200);
@@ -212,6 +260,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     // Forwarded to RevenueCat (which may not answer): Revflare answers too.
     const fwdBundle = "com.example.refunds.forwarded";
     const fwd = await createApp(client, "Forwarded", fwdBundle);
+    await confirmed(fwd.id, ["8700"]);
     expect((await call(client, `/api/v1/apps/${fwd.id}`, { method: "PATCH", body: { forwardNotificationUrl: "https://rc.example.com/hook/refunds" } })).status).toBe(200);
     expect((await call(client, `/api/v1/apps/${fwd.id}/integrations/refunds`)).json).toMatchObject({ source: "workspace", enabled: true, refundPolicy: "decline" });
     let forwarded = 0;
@@ -231,6 +280,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     // Notifications go to another server: a fresh request polled from Notification History is answered; an old one is history.
     const otherBundle = "com.example.refunds.other";
     const other = await createApp(client, "Other", otherBundle);
+    await confirmed(other.id, ["8800", "8801"]);
     const h = await request({ bundleId: otherBundle, transactionId: "8800", type: "Non-Consumable", productId: "pro", purchaseDate: Date.now() - DAY, price: 1990 });
     const old = await request({ bundleId: otherBundle, transactionId: "8801", type: "Non-Consumable", productId: "pro", purchaseDate: Date.now() - 3 * DAY }, { signedDate: Date.now() - 2 * DAY });
     fetchMock
@@ -254,6 +304,7 @@ describe("refund requests (CONSUMPTION_REQUEST → Send Consumption Information)
     const client = await setup("Refunds unanswered");
     const bundleId = "com.example.refunds.unanswered";
     const app = await createApp(client, "Unanswered", bundleId);
+    await confirmed(app.id, ["9500", "9501", "9502", "9503", "9504"]);
     const alerts = async () => ((await call(client, "/api/v1/alerts")).json.items as any[]).filter((a) => a.kind === "refund_request_unanswered");
 
     // Off (no settings): skipped, and an alert says so.

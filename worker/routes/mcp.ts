@@ -298,7 +298,7 @@ export function mcpRoutes(api: { fetch: (req: Request, env: Env, ctx: ExecutionC
     },
     get_refund_requests: {
       description:
-        "An app's answers to Apple's refund requests (CONSUMPTION_REQUEST → Send Consumption Information): settings (enabled, consent attestation with who / when, refund preference policy none / decline / decline_if_delivered_after_days / grant_prorated / grant_full, source app | workspace defaults, " +
+        "An app's answers to Apple's refund requests (CONSUMPTION_REQUEST → Send Consumption Information): settings (enabled, consent attestation with who / when, consentSource in_app (only customers who agreed in the app via RevflareKit 1.11+ Revflare.setRefundDataConsent; default) | attested (every customer who did not say no), DELIVERED sent only for purchases RevflareStore reported as delivered (others not answered), refund preference policy none / decline / decline_if_delivered_after_days / grant_prorated / grant_full, source app | workspace defaults, " +
         "sampleContentProvided, consumed percentage, deliveryStatus), where the app's notifications go, counts (pending / sent / skipped / failed / expired) and the last requests, newest first " +
         "(transaction, product, Apple's consumptionRequestReason, status, the body sent, Apple's HTTP status and answer, skip / failure reason). Forwarded and polled (inside Apple's 12 hours) requests are answered too; unanswered production ones raise refund_request_unanswered alerts. " +
         "Read-only: change settings with the CLI (revflare refunds <app> set, or revflare refunds defaults set for every app) or the web app.",

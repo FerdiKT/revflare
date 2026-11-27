@@ -107,6 +107,9 @@ public final class RevflareStore: ObservableObject {
     private let productLoader: @Sendable ([String]) async throws -> [Product]
     private let now: @Sendable () -> Date
     private let linkPurchases: @Sendable () -> Void
+    /// Reports purchases that gave access (refund requests: Revflare answers DELIVERED only for these).
+    private let noteDelivered: @Sendable (Set<String>) -> Void
+    private var notedDelivered = Set<String>()
     private let offeringsLoader: @Sendable (OfferingsFetchPolicy) async throws -> RevflareOfferings
     /// Records funnel events (``Revflare/trackAutomatic(_:properties:)`` in the app).
     private let trackEvent: @Sendable (String, [String: String]) -> Void
@@ -219,6 +222,7 @@ public final class RevflareStore: ObservableObject {
          signOffer: @escaping @Sendable (String, String, UUID?) async throws -> RevflarePromotionalOfferSignature = {
              try await Revflare.signPromotionalOffer(productId: $0, offerId: $1, appAccountToken: $2)
          },
+         noteDelivered: @escaping @Sendable (Set<String>) -> Void = { Revflare.noteDelivered($0) },
          start: Bool = true) {
         let server = ServerEntitlements.load(from: persistence, key: serverEntitlementsKey())
         let declared = Set(productIds).union(mapping.allProductIds)
@@ -245,6 +249,7 @@ public final class RevflareStore: ObservableObject {
         self.loadsOfferingsAutomatically = loadsOfferingsAutomatically
         self.trackEvent = trackEvent
         self.signOffer = signOffer
+        self.noteDelivered = noteDelivered
         if start { self.start() }
     }
 
@@ -448,6 +453,12 @@ public final class RevflareStore: ObservableObject {
         let computed = CustomerEntitlements.compute(transactions: transactions, statuses: statuses, mapping: mapping,
                                                     durations: nonRenewingDurations, now: now())
         if computed != customer { customer = computed }
+        // Purchases bought by this Apple Account that give access now: delivered.
+        let delivered = Set(computed.activeTransactions.values.filter { $0.ownership == .purchased }.map { String($0.originalId) })
+        if !delivered.isSubset(of: notedDelivered) {
+            notedDelivered.formUnion(delivered)
+            noteDelivered(delivered)
+        }
         if !hasLoadedEntitlements { hasLoadedEntitlements = true }
         scheduleExpiryRefresh()
     }

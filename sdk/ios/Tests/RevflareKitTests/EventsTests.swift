@@ -635,6 +635,30 @@ final class StorePurchaseEventsTests: XCTestCase {
         XCTAssertEqual(PurchaseEventContext.errorCode(Product.PurchaseError.purchaseNotAllowed), "purchase_not_allowed")
     }
 
+    /// 1.11: purchases that give access are reported as delivered (refund requests), once; family-shared ones never.
+    func testReportsDeliveredPurchases() async {
+        let noted = Locked<[Set<String>]>([])
+        let store = RevflareStore(productIds: ["com.example.annual"],
+                                  mapping: EntitlementMapping(["pro": ["com.example.annual"]]),
+                                  backend: backend, productLoader: { _ in [] },
+                                  now: { Date(timeIntervalSince1970: 1_800_000_000) }, linkPurchases: {},
+                                  trackEvent: { _, _ in }, noteDelivered: { ids in noted.withLock { $0.append(ids) } },
+                                  start: false)
+        await store.refresh()
+        XCTAssertEqual(noted.current, [])
+        backend.entitlements.withLock { $0 = [self.transaction()] }
+        await store.refresh()
+        await store.refresh()
+        XCTAssertEqual(noted.current, [["10"]])
+        var shared = transaction()
+        shared.id = 20
+        shared.originalId = 20
+        shared.ownership = .familyShared
+        backend.entitlements.withLock { $0 = [shared] }
+        await store.refresh()
+        XCTAssertEqual(noted.current, [["10"]])
+    }
+
     func testRestore() async throws {
         let store = makeStore()
         backend.entitlements.withLock { $0 = [self.transaction()] }

@@ -16,8 +16,8 @@ In-App Purchase key), body `ConsumptionRequest`:
 
 | Field | Value |
 | --- | --- |
-| `customerConsented` | always `true` (Revflare only answers when consent was confirmed, see below) |
-| `deliveryStatus` | always `DELIVERED`: Revflare cannot know about delivery problems in your app |
+| `customerConsented` | always `true`: Revflare only answers for customers whose consent counts (see [Consent](#consent-required-by-apple)) |
+| `deliveryStatus` | `DELIVERED`, only for purchases RevflareKit's `RevflareStore` reported as delivered (see [Delivery](#delivery)); requests for other purchases are not answered |
 | `sampleContentProvided` | your setting (a free trial, a sample or a description of the content was offered before purchase) |
 | `refundPreference` | from the policy below, or left out |
 | `consumptionPercentage` | your optional "consumed %" setting × 1000 (milliunits), for consumables, non-consumables and non-renewing subscriptions; **never** for auto-renewable subscriptions (Apple computes it from the elapsed time) |
@@ -43,9 +43,31 @@ unambiguous), and you are solely responsible for obtaining it. App Tracking Tran
 different thing. To turn answers on, a member with the `manage` permission must confirm *"I obtained my customers'
 consent to share consumption data with Apple, as Apple requires"*; Revflare stores who confirmed it and when.
 
-Customers can withdraw their consent at any time: open the customer in Revflare and choose **Withdraw consent**
-(or `PUT /api/v1/customers/:id/refund-consent { "consent": false }`). Their requests are then skipped and logged as
-such.
+**Whose consent counts** (`consentSource`, CLI `--consent-source`):
+
+- **In the app** (`in_app`, the default): only customers who agreed in the app. Add an opt-in the customer controls,
+  never pre-checked (e.g. a toggle in the app's Settings: *"Share my purchase and usage information with Apple when I
+  ask for a refund"*), and call `Revflare.setRefundDataConsent(true)` / `(false)` from it (RevflareKit 1.11+). The
+  answer is stored on the device and reported with the purchases the device holds (`refund_consents`, per original
+  transaction), later purchases included. A customer who never answered gets **no** answer from Revflare. Existing
+  users stay without consent until they choose.
+- **Every customer** (`attested`): you obtained consent another way (e.g. your terms) and attest to it. A customer who
+  turned it off in the app is still skipped.
+
+Either way customers can withdraw their consent at any time: in the app (`setRefundDataConsent(false)`) or in
+Revflare (open the customer and choose **Withdraw consent**, or `PUT /api/v1/customers/:id/refund-consent
+{ "consent": false }`). Their requests are then skipped and logged as such.
+
+## Delivery
+
+`deliveryStatus` `DELIVERED` is sent only when the purchase is known to have been delivered: RevflareKit 1.11+'s
+`RevflareStore` reports the original transactions that gave the customer access on the device (an active entitlement
+computed from the purchase, family-shared purchases excluded) with the install report (`deliveredTransactionIds`,
+stored in `purchase_deliveries`). Requests for purchases without that report are skipped ("Delivery not confirmed"):
+apps that sell through RevenueCat or their own StoreKit code, purchases made before the app used RevflareKit 1.11
+(they are reported once the app runs 1.11 and the purchase still gives access), and consumables (they never give an
+entitlement). Test the three cases in Sandbox before turning answers on: consent given, consent turned off, purchase
+not delivered.
 
 **Privacy label**: if you answer refund requests, disclose in your App Store privacy answers the data you share with
 Apple for this purpose (purchase / usage data used for app functionality: refund handling). Apple keeps it only to
@@ -67,8 +89,8 @@ Requests are answered right after the notification arrives, then retried by the 
 `5xx` and network errors, and while the In-App Purchase key or the app's bundle id is missing (after 1, 5, 15, 30
 minutes, 1, 2 and 4 hours, or a `429`'s `Retry-After` when longer) as long as the 12 hours last; after that they are
 `expired`. Other errors (`400` invalid body, `401` key problem, `404` unknown transaction) fail with Apple's
-message. A request is skipped when answers are off, the consent attestation is missing, the customer withdrew consent
-or it comes from Xcode / local StoreKit testing.
+message. A request is skipped when answers are off, the consent attestation is missing, the customer gave no consent
+in the app (`in_app`) or withdrew it, delivery was not confirmed, or it comes from Xcode / local StoreKit testing.
 
 **Alerts**: a production request that goes unanswered (answers off or no attestation, Apple refused the answer, the
 12 hours passed, or the key / bundle id is missing while retrying) raises a `refund_request_unanswered` alert (one per
@@ -86,9 +108,12 @@ sets the settings every App Store app without its own settings uses, new apps in
 
 1. The app's notifications must come to Revflare (the app's page → **Notifications**), and the workspace needs the
    In-App Purchase key (the same key that reads transactions).
-2. The app's page → **Integrations → Refund requests**: tick the consent attestation, pick a preference, optionally
-   "Sample content provided" and "Consumed %", and turn it on.
-3. Check the log: each request with the product, Apple's HTTP status (`202` = accepted), Apple's answer and the reason
+2. In the app (RevflareKit 1.11+, purchases through `RevflareStore`): an opt-in calling
+   `Revflare.setRefundDataConsent(_:)`, and the privacy answers below.
+3. The app's page → **Integrations → Refund requests**: tick the consent attestation, choose whose consent counts,
+   pick a preference (start with *No preference*), optionally "Sample content provided" and "Consumed %", and turn it
+   on.
+4. Check the log: each request with the product, Apple's HTTP status (`202` = accepted), Apple's answer and the reason
    for skips and failures.
 
 CLI: `revflare refunds <app>` (status), `revflare refunds <app> set --attest-consent --enable --policy decline-after
@@ -104,8 +129,9 @@ as before.
 
 ## Limits
 
-- Revflare cannot tell whether a purchase was delivered or how much was used: `deliveryStatus` is always `DELIVERED`
-  and the consumed percentage is a fixed per-app value. If your app can fail to deliver content, keep the preference
-  at *No preference*.
+- Delivery is what `RevflareStore` saw on the device (the purchase gave access); how much was used is not known: the
+  consumed percentage is a fixed per-app value. Purchases without a delivery report are not answered.
+- Consent is per original transaction the customer's device holds: a purchase never seen by a device where the
+  customer answered is not covered.
 - Requests that arrived while answers were off are not answered later.
 - The log keeps the last 100 requests per app on screen; rows are deleted after 180 days.

@@ -6,7 +6,7 @@ import { resolveApp } from "../resolve.js";
 import type { RefundPolicy, RefundRequestDefaults, RefundRequestLogItem, RefundRequestSettings, RefundRequestSettingsUpdate } from "../types.js";
 
 const ACTIONS = ["set", "log", "consent"] as const;
-const SET_FLAGS = ["enable", "disable", "attest-consent", "withdraw-attestation", "policy", "days", "sample", "consumed", "use-defaults"];
+const SET_FLAGS = ["enable", "disable", "attest-consent", "withdraw-attestation", "consent-source", "policy", "days", "sample", "consumed", "use-defaults"];
 
 /** Short CLI names → API policies (the API names work too). */
 const POLICY_ALIASES: Record<string, RefundPolicy> = {
@@ -35,6 +35,12 @@ export function refundsUpdateBody(values: Parsed["values"]): RefundRequestSettin
   if (values["attest-consent"] && values["withdraw-attestation"]) throw new UsageError("Use either --attest-consent or --withdraw-attestation");
   if (values["attest-consent"]) body.consentAttested = true;
   if (values["withdraw-attestation"]) body.consentAttested = false;
+  const source = str(values["consent-source"]);
+  if (source !== undefined) {
+    const v = source.trim().toLowerCase().replace("-", "_");
+    if (v !== "in_app" && v !== "attested") throw new UsageError(`--consent-source takes in-app or attested`);
+    body.consentSource = v;
+  }
   if (values.enable) body.enabled = true;
   if (values.disable) body.enabled = false;
   const policy = str(values.policy);
@@ -78,6 +84,7 @@ function printStatus(name: string, s: RefundRequestSettings | RefundRequestDefau
   println(`${c.bold(app ? "Refund requests" : "Refund request defaults")}  ${name}  ${s.enabled ? c.green("● on") : c.gray("○ off")}${from}`);
   const rows: Array<[string, string]> = [
     ["Consent attested", s.consentAttested ? `yes, by ${s.consentAttestedBy ?? "?"} ${s.consentAttestedAt ? fmtWhen(s.consentAttestedAt) : ""}`.trim() : c.yellow("no")],
+    ["Consent from", s.consentSource === "attested" ? "every customer (attested; except those who said no)" : "customers who agreed in the app (RevflareKit setRefundDataConsent)"],
     ["Preference", POLICY_LABEL[s.refundPolicy].replace("{days}", String(s.declineAfterDays ?? "?"))],
     ["Sample content", yes(s.sampleContentProvided)],
     ["Consumed %", s.consumptionPercent === null ? c.gray("not sent") : `${s.consumptionPercent} % (not for auto-renewable subscriptions)`],
@@ -85,7 +92,7 @@ function printStatus(name: string, s: RefundRequestSettings | RefundRequestDefau
   if (!app) rows.push(["Apps", `${fmtNum(s.apps.usingDefaults)} of ${fmtNum(s.apps.total)} App Store apps use these (the others have their own settings)`]);
   else {
     rows.push(
-      ["Delivery status", s.deliveryStatus],
+      ["Delivery status", "DELIVERED, only for purchases RevflareStore reported as delivered (others: not answered)"],
       ["Notifications", `${s.notifications.status}${s.notifications.forwarded ? " (forwarded; Revflare answers too)" : ""}`],
       ["Requests", `${fmtNum(s.stats.sent)} answered · ${fmtNum(s.stats.pending)} pending · ${fmtNum(s.stats.skipped)} skipped · ${fmtNum(s.stats.failed)} failed · ${fmtNum(s.stats.expired)} expired`],
       ["Last answered", s.lastSentAt ? fmtWhen(s.lastSentAt) : "-"],
@@ -107,7 +114,10 @@ export const refunds: Command = {
     "apps without their own settings use (new apps too). Actions:\n" +
     "  (none)    status: settings, consent attestation, counts, last error\n" +
     "  set       change settings (needs manage). Turning it on needs --attest-consent: you confirm you obtained your\n" +
-    "            customers' consent to share consumption data with Apple, as Apple requires\n" +
+    "            customers' consent to share consumption data with Apple, as Apple requires. Whose consent counts:\n" +
+    "            --consent-source in-app (default: only customers who agreed in the app through RevflareKit 1.11+\n" +
+    "            Revflare.setRefundDataConsent) or attested (every customer who did not say no). Either way DELIVERED is\n" +
+    "            sent only for purchases RevflareStore reported as delivered; other requests are not answered\n" +
     "  log       the last requests: answered (Apple's HTTP status) / skipped / failed / expired, with the reason\n" +
     "  consent   a customer withdraws (off) or gives back (on) consent: their requests are skipped\n" +
     "Policies: none (default), decline (DECLINE at any age), decline-after --days N (DECLINE when the purchase is at least N days old), prorated, full.",
@@ -116,6 +126,7 @@ export const refunds: Command = {
     disable: { type: "boolean", description: "set: stop answering" },
     "attest-consent": { type: "boolean", description: "set: confirm you obtained your customers' consent (recorded with your name)" },
     "withdraw-attestation": { type: "boolean", description: "set: withdraw the attestation (turns answers off)" },
+    "consent-source": { type: "string", arg: "<in-app|attested>", description: "set: whose consent counts: customers who agreed in the app (default) or every customer (attested)" },
     policy: { type: "string", arg: "<none|decline-after|prorated|full>", description: "set: refund preference sent to Apple" },
     days: { type: "string", arg: "<n>", description: "set: days for decline-after" },
     sample: { type: "string", arg: "<on|off>", description: "set: sampleContentProvided (a trial / sample was offered)" },
