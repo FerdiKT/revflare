@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "RevflareKit", targets: ["RevflareKit"]),
     ],
     targets: [
-        .target(name: "RevflareKit"),
+        .target(name: "RevflareKit", resources: [.process("PrivacyInfo.xcprivacy")]),
         .testTarget(name: "RevflareKitTests", dependencies: ["RevflareKit"]),
     ],
     swiftLanguageModes: [.v6]
